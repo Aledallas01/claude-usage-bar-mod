@@ -8,6 +8,8 @@ import type { Elements, EngineInterface, Register, SessionContextUsage, SessionR
 import type { StoredContext, StoredLimits } from '../types'
 import { readConfig } from './lib/config'
 import type { Config } from './lib/config'
+import { dict, normalizeLang } from './lib/i18n'
+import type { Lang } from './lib/i18n'
 import { accessibleSummary, contextText, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
 import { describeWindows, pickWindows } from './lib/windows'
 
@@ -15,6 +17,42 @@ const limits = atom({ plugin: 'usage-time-bar', key: 'limits' } as const, null)
 const clockNow = atom({ plugin: 'usage-time-bar', key: 'now' } as const, 0)
 const isHidden = atom({ plugin: 'usage-time-bar', key: 'isHidden' } as const, false)
 const isPaneOpen = atom({ plugin: 'usage-time-bar', key: 'isPaneOpen' } as const, false)
+const lang = atom({ plugin: 'usage-time-bar', key: 'lang' } as const, 'it')
+
+/**
+ * Lingua dell'interfaccia. In ordine: scelta forzata in configurazione; lingua
+ * del sistema (CurrentUICulture via PowerShell); variabili d'ambiente; Intl;
+ * infine inglese. Rilevata una sola volta all'avvio.
+ */
+async function detectLang($: EngineInterface, config: Config): Promise<Lang> {
+  if (config.language !== 'auto') return config.language
+  try {
+    const r = await $.process.run([
+      'powershell',
+      '-NoProfile',
+      '-Command',
+      '[System.Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName',
+    ])
+    const l = normalizeLang(r.stdout)
+    if (l !== undefined) return l
+  } catch {
+    // niente PowerShell: provo le vie sotto.
+  }
+  try {
+    const l = normalizeLang((await $.env.get('LC_ALL')) ?? (await $.env.get('LANG')))
+    if (l !== undefined) return l
+  } catch {
+    // variabili d'ambiente non leggibili.
+  }
+  try {
+    const l = normalizeLang(new Intl.DateTimeFormat().resolvedOptions().locale)
+    if (l !== undefined) return l
+  } catch {
+    // Intl non disponibile.
+  }
+
+  return 'en'
+}
 
 const STORE_LIMITS = 'lastLimits'
 const STORE_HIDDEN = 'isHidden'
@@ -96,10 +134,13 @@ export const register: Register = (on, options) => {
   const config = readConfig(options)
 
   on('session.start', async ($, e, next) => {
+    const detected = await detectLang($, config)
+    await update($, lang, () => detected)
+    const d = dict(detected)
     await $.command.register({
       name: 'usage-time',
-      description: 'Utilizzo reale e tempo trascorso dei limiti di 5 ore e 7 giorni',
-      argumentHint: '[mostra|nascondi|dettagli]',
+      description: d.cmdDescription,
+      argumentHint: d.cmdArgHint,
     })
     if ((await read($, limits)) === null) {
       const saved = parseStored(await $.store.get(STORE_LIMITS))
@@ -143,6 +184,7 @@ export const register: Register = (on, options) => {
     return renderBand({
       surface: e.surface,
       elements: $.ui.resolve(e),
+      lang: await read($, lang),
       views: describeWindows(stored.windows, now, config.durations),
       context: stored.context,
       now,
@@ -155,13 +197,15 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: 'usage-time' }, async ($, e) => {
     const elements = $.ui.resolve(e) as Elements['desktop'] | Elements['terminal']
     const onClose = () => void closePane($)
+    const l = await read($, lang)
     const stored = await read($, limits)
-    if (stored === null) return renderEmptyCard(elements, e.props.bodyColumns, onClose, true)
+    if (stored === null) return renderEmptyCard(elements, l, e.props.bodyColumns, onClose, true)
     const now = (await read($, clockNow)) || (await $.clock.now())
 
     return renderBand({
       surface: e.surface,
       elements,
+      lang: l,
       views: describeWindows(stored.windows, now, config.durations),
       context: stored.context,
       now,
@@ -198,6 +242,7 @@ export const register: Register = (on, options) => {
 
     return renderModeButton({
       elements: $.ui.resolve(e),
+      lang: await read($, lang),
       modes: e.props.modes,
       views: stored === null ? [] : describeWindows(stored.windows, now, config.durations),
       isOpen: open,
@@ -206,6 +251,7 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'usage-time' }, async ($, e) => {
+    const d = dict(await read($, lang))
     const arg = e.args.trim().toLowerCase()
     if (arg === 'nascondi' || arg === 'hide') {
       await update($, isHidden, () => true)
@@ -213,7 +259,7 @@ export const register: Register = (on, options) => {
       await $.store.set(STORE_HIDDEN, true)
       await refreshStatus($, config)
 
-      return { text: 'Fascia fissa nascosta. Usa /usage-time per il popup o /usage-time mostra per la fascia.' }
+      return { text: d.cmdHiddenOk }
     }
     if (arg === 'mostra' || arg === 'show') {
       await update($, isHidden, () => false)
@@ -221,15 +267,12 @@ export const register: Register = (on, options) => {
       await refreshStatus($, config)
     }
     if (arg === '') await openPane($)
+    const l = await read($, lang)
     const stored = await read($, limits)
-    if (stored === null) {
-      return {
-        text: 'Nessun dato sui limiti ancora ricevuto in questa sessione: compare dopo la prima risposta di Claude.',
-      }
-    }
+    if (stored === null) return { text: d.cmdNoData }
     const now = await $.clock.now()
-    const lines = describeWindows(stored.windows, now, config.durations).map(view => accessibleSummary(view, now))
-    if (stored.context !== undefined) lines.unshift(`Finestra di contesto: ${contextText(stored.context)} (dato del motore).`)
+    const lines = describeWindows(stored.windows, now, config.durations).map(view => accessibleSummary(view, now, undefined, l))
+    if (stored.context !== undefined) lines.unshift(d.contextOf(contextText(stored.context)))
 
     return { text: lines.join('\n') }
   })

@@ -1,10 +1,17 @@
 {
   "name": "usage-time-bar",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "author": { "name": "bookst" },
   "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra.",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Lingua / Language",
+      "description": "auto = lingua del sistema; it = italiano; en = inglese.",
+      "options": ["auto", "it", "en"],
+      "default": "auto"
+    },
     "showButton": {
       "type": "boolean",
       "title": "Pulsante del ritmo nel piede del prompt",

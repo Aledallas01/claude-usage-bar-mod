@@ -6,6 +6,8 @@ import { DEFAULT_DURATIONS_MS } from './windows'
 import type { WindowKind } from './windows'
 
 export type Config = {
+  /** 'auto' = lingua del sistema; 'it'/'en' = forzata. */
+  language: 'auto' | 'it' | 'en'
   showBand: boolean
   showButton: boolean
   showStatus: boolean
@@ -21,6 +23,7 @@ export function readConfig(options: PluginOptions | undefined): Config {
   const o = options ?? {}
 
   return {
+    language: o.language === 'it' || o.language === 'en' ? o.language : 'auto',
     showBand: o.showBand === true,
     showButton: o.showButton !== false,
     showStatus: o.showStatus === true,

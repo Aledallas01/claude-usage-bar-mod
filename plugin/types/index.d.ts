@@ -11,6 +11,12 @@ export type StoredLimits = { observedAt: number; windows: StoredWindow[]; contex
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-time-bar': { limits: StoredLimits | null; now: number; isHidden: boolean; isPaneOpen: boolean }
+    'usage-time-bar': {
+      limits: StoredLimits | null
+      now: number
+      isHidden: boolean
+      isPaneOpen: boolean
+      lang: 'it' | 'en'
+    }
   }
 }

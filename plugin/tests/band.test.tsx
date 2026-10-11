@@ -36,6 +36,7 @@ function engineBeneath(on: On, rateLimits: SessionRateLimit[] = LIMITS) {
   }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('ui.status', () => ({ value: undefined }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'it', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.open', ($, e) => {
     panes.opened.push(e.id)
 
@@ -388,6 +389,29 @@ describe('pulsante accanto ai limiti e popup', () => {
     })
     expect(await pane.find({ type: 'Text', text: '412k / 1M (41%)' })).toBeDefined()
     expect(await pane.find({ type: 'Text', text: /^42%$/ })).toBeDefined()
+    await pane.unmount()
+  })
+
+  test('con sistema in inglese i testi del riquadro sono tradotti', async ($, on) => {
+    mock.clock(on, { now: NOW })
+    mock.store(on)
+    on('session.start', ($, e) => ({ cwd: e.cwd }))
+    on('command.register', ($, e) => ({ value: { command: e.name } }))
+    on('session.usage', () => ({
+      value: { startedAt: NOW, context: { window: 1_000_000, tokens: 307_600, percent: 31 }, rateLimits: LIMITS },
+    }))
+    on('ui.status', () => ({ value: undefined }))
+    on('process.run', () => ({ value: { exitCode: 0, stdout: 'en-US', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })) // lingua di sistema inglese
+    await start($)
+    const pane = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...PANE })
+    expect(await pane.find({ type: 'Text', text: 'Context window' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Plan usage limits · pace' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Session limit' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'Weekly · all models' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: /^Resets in 2h 30m/ })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: '8 pts behind pace' })).toBeDefined()
+    // niente parole italiane
+    expect(await pane.find({ type: 'Text', text: 'Limite di sessione' })).toBeUndefined()
     await pane.unmount()
   })
 

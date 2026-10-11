@@ -7,6 +7,9 @@
 /** Soglia sotto la quale un timestamp numerico è interpretato in secondi. */
 const SECONDS_THRESHOLD = 1e11 // 1e11 s = anno 5138; 1e11 ms = marzo 1973
 
+import { LOCALES } from './i18n'
+import type { Lang } from './i18n'
+
 export type TimeInput = {
   /** Inizio effettivo della finestra, se noto (ms, s, ISO 8601 o Date). */
   windowStart?: unknown
@@ -132,33 +135,42 @@ const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
-/** "3 g 4 h", "2 h 15 min", "7 min", "meno di 1 min". */
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms) || ms < MINUTE) return 'meno di 1 min'
+const DUR: Record<Lang, { d: string; h: string; m: string; less: string; sep: string }> = {
+  it: { d: 'g', h: 'h', m: 'min', less: 'meno di 1 min', sep: ' ' },
+  en: { d: 'd', h: 'h', m: 'm', less: 'less than 1 min', sep: '' },
+}
+
+/** "3 g 4 h" (it) / "3d 4h" (en), "2 h 15 min" / "2h 15m", "7 min" / "7m". */
+export function formatDuration(ms: number, lang: Lang = 'it'): string {
+  const u = DUR[lang]
+  if (!Number.isFinite(ms) || ms < MINUTE) return u.less
   const days = Math.floor(ms / DAY)
   const hours = Math.floor((ms % DAY) / HOUR)
   const minutes = Math.floor((ms % HOUR) / MINUTE)
-  if (days > 0) return hours > 0 ? `${days} g ${hours} h` : `${days} g`
-  if (hours > 0) return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`
+  const p = (n: number, unit: string) => `${n}${u.sep}${unit}`
+  if (days > 0) return hours > 0 ? `${p(days, u.d)} ${p(hours, u.h)}` : p(days, u.d)
+  if (hours > 0) return minutes > 0 ? `${p(hours, u.h)} ${p(minutes, u.m)}` : p(hours, u.h)
 
-  return `${minutes} min`
+  return p(minutes, u.m)
 }
 
 /**
  * Orario locale del reset: "18:30" se cade oggi, "sab 18:30" entro una
- * settimana, altrimenti "12 ott 18:30". `timeZone` serve ai test.
+ * settimana, altrimenti "12 ott 18:30" (nella lingua scelta, 24 ore).
+ * `timeZone` serve ai test.
  */
-export function formatResetTime(resetAt: number, now: number, timeZone?: string): string {
-  const time = new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit', timeZone }).format(resetAt)
+export function formatResetTime(resetAt: number, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const loc = LOCALES[lang]
+  const time = new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(resetAt)
   const dayKey = (ms: number) =>
     new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone }).format(ms)
   if (dayKey(resetAt) === dayKey(now)) return time
   if (Math.abs(resetAt - now) < 6 * DAY) {
-    const weekday = new Intl.DateTimeFormat('it-IT', { weekday: 'short', timeZone }).format(resetAt)
+    const weekday = new Intl.DateTimeFormat(loc, { weekday: 'short', timeZone }).format(resetAt)
 
     return `${weekday} ${time}`
   }
-  const date = new Intl.DateTimeFormat('it-IT', { day: 'numeric', month: 'short', timeZone }).format(resetAt)
+  const date = new Intl.DateTimeFormat(loc, { day: 'numeric', month: 'short', timeZone }).format(resetAt)
 
   return `${date} ${time}`
 }

@@ -3,18 +3,13 @@
 
 import type { Elements, RenderElement } from 'claude-code'
 
+import { dict } from './i18n'
+import type { Lang } from './i18n'
 import { formatDuration, formatPercent, formatResetTime } from './timeWindow'
 import type { WindowView } from './windows'
 
 /** Scarto (punti percentuali) oltre il quale il ritmo è segnalato. */
 const PACE_TOLERANCE = 5
-
-const REASONS: Record<string, string> = {
-  'invalid-now': 'ora corrente non valida',
-  'missing-reset': 'orario di reset non comunicato',
-  'unknown-duration': 'durata della finestra sconosciuta',
-  'invalid-window': 'orari della finestra non validi',
-}
 
 function escapeXml(text: string): string {
   return text.replace(/[<>&"']/g, c => `&#${c.charCodeAt(0)};`)
@@ -32,39 +27,41 @@ export function paceOf(view: WindowView): Pace {
   return 'even'
 }
 
-export function usageText(view: WindowView): string {
-  return `Utilizzo reale ${formatPercent(view.percentUsed)}`
+export function usageText(view: WindowView, lang: Lang = 'it'): string {
+  return dict(lang).usageReal(formatPercent(view.percentUsed))
 }
 
-export function timeText(view: WindowView, now: number, timeZone?: string): string {
+export function timeText(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const d = dict(lang)
   const t = view.time
-  if (!t.ok) return `Stima non disponibile (${REASONS[t.reason] ?? t.reason})`
-  if (t.isResetPassed) {
-    return `Reset già avvenuto (${formatResetTime(t.resetAt, now, timeZone)}): in attesa di dati aggiornati`
-  }
-  const start = t.isStartDerived ? ' (inizio stimato)' : ''
+  if (!t.ok) return d.estimateUnavailable(d.reason[t.reason] ?? t.reason)
+  if (t.isResetPassed) return d.resetPassedWaiting(formatResetTime(t.resetAt, now, timeZone, lang))
 
-  return `Tempo trascorso ${formatPercent(t.elapsedPercent)}${start} · reset tra ${formatDuration(
-    t.remainingMs,
-  )} (${formatResetTime(t.resetAt, now, timeZone)})`
+  return `${d.elapsed(formatPercent(t.elapsedPercent), t.isStartDerived)} · ${d.resetsInShort(
+    formatDuration(t.remainingMs, lang),
+    formatResetTime(t.resetAt, now, timeZone, lang),
+  )}`
 }
 
-export function paceText(pace: Pace, view: WindowView): string | undefined {
+export function paceText(pace: Pace, view: WindowView, lang: Lang = 'it'): string | undefined {
   if (pace === undefined || !view.time.ok) return undefined
-  const diff = Math.round(view.percentUsed - view.time.elapsedPercent)
-  if (pace === 'ahead') return `consumo più rapido del tempo (+${diff} pt)`
-  if (pace === 'behind') return `consumo più lento del tempo (${diff} pt)`
+  const d = dict(lang)
+  const diff = Math.round(Math.abs(view.percentUsed - view.time.elapsedPercent))
+  if (pace === 'ahead') return d.paceAhead(diff)
+  if (pace === 'behind') return d.paceBehind(diff)
 
-  return 'consumo in linea con il tempo'
+  return d.paceEven
 }
 
 /** Frase completa per lettori di schermo, tooltip e comando /usage-time. */
-export function accessibleSummary(view: WindowView, now: number, timeZone?: string): string {
-  const pace = paceText(paceOf(view), view)
+export function accessibleSummary(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const d = dict(lang)
+  const pace = paceText(paceOf(view), view, lang)
+  const label = d.windowLabel[view.kind]
 
-  return `${view.label}: ${usageText(view)} (dato ufficiale di Claude). ${timeText(view, now, timeZone)}${
-    view.time.ok && !view.time.isResetPassed ? ' (progressione temporale teorica, calcolata dalla mod)' : ''
-  }.${pace ? ` Ritmo: ${pace}.` : ''}`
+  return `${label}: ${usageText(view, lang)} (${d.official}). ${timeText(view, now, timeZone, lang)}${
+    view.time.ok && !view.time.isResetPassed ? ` (${d.theoretical})` : ''
+  }.${pace ? ` ${d.pace}: ${pace}.` : ''}`
 }
 
 /**
@@ -72,26 +69,23 @@ export function accessibleSummary(view: WindowView, now: number, timeZone?: stri
  * sottile blu (utilizzo reale), tratto verde/rosso fino al ritmo, tacca sul
  * tempo trascorso. Larga 1000 per riempire lo spazio: il desktop la riduce.
  */
-export function barSvg(view: WindowView, now: number, timeZone?: string): string {
+export function barSvg(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const d = dict(lang)
   const W = 400
   const usage = Math.min(100, Math.max(0, view.percentUsed))
   const t = view.time
   const hasTime = t.ok && !t.isResetPassed
   const elapsed = hasTime ? t.elapsedPercent : 0
   const x = (pct: number) => ((pct / 100) * W).toFixed(2)
-  const usageTitle = escapeXml(`${usageText(view)} — valore ufficiale mostrato da Claude`)
-  const timeTitle = escapeXml(`${timeText(view, now, timeZone)} — progressione teorica calcolata dalla mod, non è consumo`)
+  const usageTitle = escapeXml(`${usageText(view, lang)} — ${d.tooltipUsage}`)
+  const timeTitle = escapeXml(`${timeText(view, now, timeZone, lang)} — ${d.tooltipTime}`)
   const markerX = Math.min(W - 1, Math.max(1, Number(x(elapsed)))).toFixed(2)
   const delta = deltaOf(view)
   const base = delta === undefined ? usage : Math.min(usage, elapsed)
   const deltaTitle =
     delta === undefined
       ? ''
-      : escapeXml(
-          delta.kind === 'over'
-            ? `Sopra il ritmo: ${formatPercent(delta.size)} usato più del tempo trascorso`
-            : `Sotto il ritmo: ${formatPercent(delta.size)} di margine rispetto al tempo trascorso`,
-        )
+      : escapeXml(delta.kind === 'over' ? d.tooltipOver(formatPercent(delta.size)) : d.tooltipUnder(formatPercent(delta.size)))
 
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="25" viewBox="0 0 ${W} 10">`,
@@ -117,21 +111,22 @@ export function barSvg(view: WindowView, now: number, timeZone?: string): string
 }
 
 /** Testo a destra del nome, come nel popup di Claude. */
-export function resetText(view: WindowView, now: number, timeZone?: string): string {
+export function resetText(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const d = dict(lang)
   const t = view.time
-  if (!t.ok) return 'Reset non comunicato'
-  if (t.isResetPassed) return 'Già ripristinato'
-  if (view.kind === 'five_hour') return `Si ripristina tra ${formatDuration(t.remainingMs)}`
+  if (!t.ok) return d.resetNotReported
+  if (t.isResetPassed) return d.alreadyReset
+  if (view.kind === 'five_hour') return d.resetsIn(formatDuration(t.remainingMs, lang))
 
-  return `Si azzera ${formatResetTime(t.resetAt, now, timeZone)}`
+  return d.resetsAtWhen(formatResetTime(t.resetAt, now, timeZone, lang))
 }
 
 /** La riga sotto la barra: tempo trascorso e ritmo, o perché manca la stima. */
-export function elapsedText(view: WindowView, now: number, timeZone?: string): string {
+export function elapsedText(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
   const t = view.time
-  if (!t.ok || t.isResetPassed) return timeText(view, now, timeZone)
+  if (!t.ok || t.isResetPassed) return timeText(view, now, timeZone, lang)
 
-  return `Tempo trascorso ${formatPercent(t.elapsedPercent)}${t.isStartDerived ? ' (stimato)' : ''}`
+  return dict(lang).elapsed(formatPercent(t.elapsedPercent), t.isStartDerived)
 }
 
 /** Scarto minimo (punti percentuali) perché il tratto verde/rosso compaia. */
@@ -188,6 +183,7 @@ export type ContextInfo = { tokens?: number; window: number; percent?: number }
 export type BandInput = {
   surface: string
   elements: Table
+  lang: Lang
   views: readonly WindowView[]
   context?: ContextInfo
   now: number
@@ -225,7 +221,7 @@ export function contextText(c: ContextInfo): string {
 }
 
 /** Barra semplice della finestra di contesto, nello stile delle altre. */
-export function contextSvg(c: ContextInfo): string {
+export function contextSvg(c: ContextInfo, lang: Lang = 'it'): string {
   const W = 400
   const pct = c.percent ?? (c.tokens !== undefined && c.window > 0 ? (c.tokens / c.window) * 100 : 0)
   const w = ((Math.min(100, Math.max(0, pct)) / 100) * W).toFixed(2)
@@ -235,7 +231,7 @@ export function contextSvg(c: ContextInfo): string {
     '<style>.track{fill:#e3e3e0}.usage{fill:#2b74d9}',
     '@media (prefers-color-scheme: dark){.track{fill:#3a3a38}.usage{fill:#3b82f6}}</style>',
     `<clipPath id="r"><rect x="0" y="2" width="${W}" height="6" rx="3"/></clipPath>`,
-    `<title>${escapeXml(`Finestra di contesto: ${contextText(c)} — dato del motore`)}</title>`,
+    `<title>${escapeXml(dict(lang).contextTooltip(contextText(c)))}</title>`,
     `<rect class="track" x="0" y="2" width="${W}" height="6" rx="3"/>`,
     `<rect class="usage" x="0" y="2" width="${w}" height="6" clip-path="url(#r)"/>`,
     '</svg>',
@@ -243,14 +239,15 @@ export function contextSvg(c: ContextInfo): string {
 }
 
 /** "37 pt sotto il ritmo" / "12 pt sopra il ritmo" / "in linea con il ritmo". */
-export function paceShort(view: WindowView): { text: string; color?: 'error' | 'success' } | undefined {
+export function paceShort(view: WindowView, lang: Lang = 'it'): { text: string; color?: 'error' | 'success' } | undefined {
   if (!view.time.ok || view.time.isResetPassed) return undefined
+  const d = dict(lang)
   const delta = deltaOf(view)
-  if (delta === undefined) return { text: 'in linea con il ritmo' }
+  if (delta === undefined) return { text: d.paceEven }
   const pts = Math.round(delta.size)
-  if (delta.kind === 'over') return { text: `${pts} pt sopra il ritmo`, color: 'error' }
+  if (delta.kind === 'over') return { text: d.paceAhead(pts), color: 'error' }
 
-  return { text: `${pts} pt sotto il ritmo`, color: 'success' }
+  return { text: d.paceBehind(pts), color: 'success' }
 }
 
 /**
@@ -260,7 +257,8 @@ export function paceShort(view: WindowView): { text: string; color?: 'error' | '
  * una riga dim con il tempo trascorso e il ritmo. Allineata a destra.
  */
 export function renderBand(input: BandInput): RenderElement {
-  const { elements, views, context, now, timeZone, isPane } = input
+  const { elements, views, context, now, timeZone, isPane, lang } = input
+  const d = dict(lang)
   const { Box, Text, Button } = elements
   const isDesktop = input.surface === 'desktop' && 'Svg' in elements
   const Svg = isDesktop ? (elements as Elements['desktop']).Svg : undefined
@@ -280,11 +278,11 @@ export function renderBand(input: BandInput): RenderElement {
       {context !== undefined && (
         <Box key="context" flexDirection="column" marginBottom={1}>
           <Box justifyContent="space-between">
-            <Text dimColor>Finestra di contesto</Text>
+            <Text dimColor>{d.contextTitle}</Text>
             <Text dimColor>{contextText(context)}</Text>
           </Box>
           {Svg !== undefined ? (
-            <Svg source={contextSvg(context)} alt={`Finestra di contesto: ${contextText(context)}`} />
+            <Svg source={contextSvg(context, lang)} alt={`${d.contextTitle}: ${contextText(context)}`} />
           ) : (
             <Text>
               <Text color="suggestion">{'█'.repeat(contextCells)}</Text>
@@ -294,7 +292,7 @@ export function renderBand(input: BandInput): RenderElement {
         </Box>
       )}
       <Box justifyContent="space-between">
-        <Text dimColor>Limiti di utilizzo del piano · ritmo</Text>
+        <Text dimColor>{d.cardTitle}</Text>
         {input.onClose !== undefined ? (
           <Button key="usage-time-close" role="dismiss" plain autoFocus onPress={input.onClose}>
             ✕
@@ -304,20 +302,20 @@ export function renderBand(input: BandInput): RenderElement {
         )}
       </Box>
       {views.map(view => {
-          const pace = paceShort(view)
+          const pace = paceShort(view, lang)
           const bars = textBars(view, barCells)
 
           return (
             <Box key={`win-${view.kind}`} flexDirection="column" marginTop={1}>
               <Box justifyContent="space-between">
-                <Text bold>{view.label}</Text>
+                <Text bold>{d.windowLabel[view.kind]}</Text>
                 <Text>
-                  <Text dimColor>{resetText(view, now, timeZone)}{'  '}</Text>
+                  <Text dimColor>{resetText(view, now, timeZone, lang)}{'  '}</Text>
                   <Text>{formatPercent(view.percentUsed)}</Text>
                 </Text>
               </Box>
               {Svg !== undefined ? (
-                <Svg source={barSvg(view, now, timeZone)} alt={accessibleSummary(view, now, timeZone)} />
+                <Svg source={barSvg(view, now, timeZone, lang)} alt={accessibleSummary(view, now, timeZone, lang)} />
               ) : (
                 <Text>
                   <Text color="suggestion">{bars.usage[0]}</Text>
@@ -328,7 +326,7 @@ export function renderBand(input: BandInput): RenderElement {
                 </Text>
               )}
               <Box justifyContent="space-between">
-                <Text dimColor>{elapsedText(view, now, timeZone)}</Text>
+                <Text dimColor>{elapsedText(view, now, timeZone, lang)}</Text>
                 {pace !== undefined && <Text color={pace.color} dimColor={pace.color === undefined}>{pace.text}</Text>}
               </Box>
             </Box>
@@ -348,6 +346,7 @@ export function renderBand(input: BandInput): RenderElement {
 
 export type ModeButtonInput = {
   elements: Table
+  lang: Lang
   /** Le etichette di modalità che il motore mostrerebbe in quel punto. */
   modes: readonly string[]
   views: readonly WindowView[]
@@ -380,7 +379,7 @@ export function renderModeButton(input: ModeButtonInput): RenderElement {
       {input.modes.length > 0 && <Text dimColor>{input.modes.join(' & ')}</Text>}
       <Button key="usage-time-open" plain onPress={input.onPress}>
         {input.isOpen ? '▾ ' : '⏱ '}
-        {parts.length > 0 ? parts : 'Ritmo limiti'}
+        {parts.length > 0 ? parts : dict(input.lang).modeFallback}
       </Button>
     </Box>
   )
@@ -389,10 +388,12 @@ export function renderModeButton(input: ModeButtonInput): RenderElement {
 /** La scheda quando non c'è ancora nessun dato: un messaggio, nessun valore inventato. */
 export function renderEmptyCard(
   elements: Table,
+  lang: Lang,
   bodyColumns: number,
   onClose?: () => void,
   isPane?: boolean,
 ): RenderElement {
+  const d = dict(lang)
   const { Box, Text, Button } = elements
 
   const card = (
@@ -405,14 +406,14 @@ export function renderEmptyCard(
       paddingX={isPane ? 0 : 1}
     >
       <Box justifyContent="space-between">
-        <Text dimColor>Limiti di utilizzo del piano · ritmo</Text>
+        <Text dimColor>{d.cardTitle}</Text>
         {onClose !== undefined && (
           <Button key="usage-time-close" role="dismiss" plain autoFocus onPress={onClose}>
             ✕
           </Button>
         )}
       </Box>
-      <Text dimColor>Nessun dato sui limiti ancora ricevuto: compare dopo la prima risposta di Claude.</Text>
+      <Text dimColor>{d.emptyData}</Text>
     </Box>
   )
 

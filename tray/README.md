@@ -28,6 +28,10 @@ usato Claude Desktop almeno una volta (così il file dei dati esiste).
 L'icona è l'orologio arancione, vicino all'orologio di Windows (se non la vedi,
 è sotto la freccetta `^` "icone nascoste": trascinala sulla barra per fissarla).
 
+## Lingua
+
+I testi del popup e del menu seguono **automaticamente** la lingua di Windows (italiano o inglese).
+
 ## Installazione
 
 ```bash

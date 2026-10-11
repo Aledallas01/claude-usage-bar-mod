@@ -54,6 +54,10 @@ progressione inventata).
 Comando: `/usage-time` (apre il popup e scrive il riepilogo), `/usage-time mostra` /
 `/usage-time nascondi` (fascia fissa sopra il prompt).
 
+## Lingua
+
+I testi (mod e app) si adattano **automaticamente** alla lingua di Windows: italiano o inglese. Si può forzare dalla configurazione della mod (`language = it | en`).
+
 ## Icona nella barra di Windows (programma separato)
 
 Oltre alla mod, in [tray/](tray/) c'è un **programma Windows** che mette
@@ -123,6 +127,7 @@ Opzioni del plugin (menu `/config` della scheda Code, o `claude plugin configure
 
 | Opzione | Predefinito | Effetto |
 | --- | --- | --- |
+| `language` | `auto` | lingua dei testi: `auto` (segue il sistema), `it`, `en` |
 | `showButton` | `true` | pulsante ⏱ nel piede del prompt che apre il popup |
 | `showBand` | `false` | barre sempre visibili sopra il prompt (anche `/usage-time mostra`) |
 | `showStatus` | `false` | riepilogo compatto `5h 42% ⏱50% · 7d 18% ⏱43%` nella riga di stato |

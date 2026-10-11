@@ -20,6 +20,33 @@ $FiveHourMs = 5 * 60 * 60 * 1000
 $SevenDayMs = 7 * 24 * 60 * 60 * 1000
 $StaleMs = 20 * 60 * 1000  # oltre 20 min senza aggiornamenti: dati non freschi
 
+# --- Lingua: segue la lingua di Windows (italiano o inglese) ---
+$script:Lang = if ([System.Globalization.CultureInfo]::CurrentUICulture.TwoLetterISOLanguageName -ieq 'it') { 'it' } else { 'en' }
+$script:Culture = [System.Globalization.CultureInfo]::GetCultureInfo($(if ($script:Lang -eq 'it') { 'it-IT' } else { 'en-US' }))
+$script:Strings = @{
+  it = @{
+    context = 'Finestra di contesto'; title = 'Limiti di utilizzo del piano · ritmo'
+    five = 'Limite di sessione'; seven = 'Settimanale · tutti i modelli'
+    resetsIn = 'Si ripristina tra {0}'; resetsAt = 'Si azzera {0}'; resetNA = 'reset non comunicato'; already = 'già ripristinato'
+    less = 'meno di 1 min'; ud = 'g'; uh = 'h'; um = 'min'; sep = ' '
+    behind = '{0} pt sotto il ritmo'; ahead = '{0} pt sopra il ritmo'; even = 'in linea con il ritmo'
+    estNA = 'stima non disponibile (reset non comunicato)'; stale = 'dati non aggiornati — apri Claude Desktop'
+    noData1 = 'Nessun dato dai limiti.'; noData2 = 'Apri Claude Desktop: i dati compaiono dopo la prima risposta.'
+    mShow = 'Mostra i limiti'; mRefresh = 'Aggiorna'; mQuit = 'Esci'; tip = 'Claude — limiti di utilizzo'
+  }
+  en = @{
+    context = 'Context window'; title = 'Plan usage limits · pace'
+    five = 'Session limit'; seven = 'Weekly · all models'
+    resetsIn = 'Resets in {0}'; resetsAt = 'Resets {0}'; resetNA = 'reset not reported'; already = 'already reset'
+    less = 'less than 1 min'; ud = 'd'; uh = 'h'; um = 'm'; sep = ''
+    behind = '{0} pts behind pace'; ahead = '{0} pts ahead of pace'; even = 'on pace'
+    estNA = 'estimate unavailable (reset not reported)'; stale = 'data not updated — open Claude Desktop'
+    noData1 = 'No usage data.'; noData2 = "Open Claude Desktop: data appears after Claude's first reply."
+    mShow = 'Show limits'; mRefresh = 'Refresh'; mQuit = 'Quit'; tip = 'Claude — usage limits'
+  }
+}
+$script:T = $script:Strings[$script:Lang]
+
 # --- Colori (tema scuro, come il popup di Claude) ---
 $ColBg = [System.Drawing.Color]::FromArgb(30, 30, 29)
 $ColBorder = [System.Drawing.Color]::FromArgb(70, 70, 68)
@@ -43,13 +70,15 @@ function Format-Percent([double]$p) {
   return ($r.ToString([System.Globalization.CultureInfo]::InvariantCulture)) + '%'
 }
 function Format-Duration([double]$ms) {
-  if ($ms -lt 60000) { return 'meno di 1 min' }
+  $t = $script:T
+  if ($ms -lt 60000) { return $t.less }
   $d = [math]::Floor($ms / 86400000)
   $h = [math]::Floor(($ms % 86400000) / 3600000)
   $m = [math]::Floor(($ms % 3600000) / 60000)
-  if ($d -gt 0) { if ($h -gt 0) { return "$d g $h h" } else { return "$d g" } }
-  if ($h -gt 0) { if ($m -gt 0) { return "$h h $m min" } else { return "$h h" } }
-  return "$m min"
+  $s = $t.sep
+  if ($d -gt 0) { if ($h -gt 0) { return "$d$s$($t.ud) $h$s$($t.uh)" } else { return "$d$s$($t.ud)" } }
+  if ($h -gt 0) { if ($m -gt 0) { return "$h$s$($t.uh) $m$s$($t.um)" } else { return "$h$s$($t.uh)" } }
+  return "$m$s$($t.um)"
 }
 function Clamp01([double]$v) { return [math]::Max(0.0, [math]::Min(1.0, $v)) }
 
@@ -113,12 +142,13 @@ function Get-LimitsData {
 }
 
 function Reset-Text($w) {
-  if ($null -eq $w.ResetMs) { return 'reset non comunicato' }
-  if ($w.ResetPassed) { return 'già ripristinato' }
-  if ($w.Kind -eq 'five_hour') { return 'Si ripristina tra ' + (Format-Duration $w.Remaining) }
+  $t = $script:T
+  if ($null -eq $w.ResetMs) { return $t.resetNA }
+  if ($w.ResetPassed) { return $t.already }
+  if ($w.Kind -eq 'five_hour') { return [string]::Format($t.resetsIn, (Format-Duration $w.Remaining)) }
   $local = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$w.ResetMs).LocalDateTime
-  $day = $local.ToString('ddd', [System.Globalization.CultureInfo]::GetCultureInfo('it-IT'))
-  return 'Si azzera ' + $day + ' ' + $local.ToString('HH:mm')
+  $day = $local.ToString('ddd', $script:Culture)
+  return [string]::Format($t.resetsAt, ($day + ' ' + $local.ToString('HH:mm')))
 }
 
 # --- Il popup ---
@@ -198,11 +228,12 @@ function On-PaintCore {
   $sfRight = New-Object System.Drawing.StringFormat
   $sfRight.Alignment = [System.Drawing.StringAlignment]::Far
 
+  $t = $script:T
   $y = 10
   $data = $script:Data
   if ($null -eq $data) {
-    $g.DrawString('Nessun dato dai limiti.', $fVal, $bText, $pad, $y)
-    $g.DrawString('Apri Claude Desktop: i dati compaiono dopo la prima risposta.', $fSmall, $bDim, $pad, ($y + 22))
+    $g.DrawString($t.noData1, $fVal, $bText, $pad, $y)
+    $g.DrawString($t.noData2, $fSmall, $bDim, $pad, ($y + 22))
     return
   }
 
@@ -211,7 +242,7 @@ function On-PaintCore {
     $pct = if ($null -ne $c.Percent) { [int]$c.Percent } elseif ($null -ne $c.Tokens -and $c.Window -gt 0) { [int][math]::Round(($c.Tokens / $c.Window) * 100) } else { $null }
     $used = if ($null -ne $c.Tokens) { Format-Tokens $c.Tokens } else { '-' }
     $ctxRight = "$used / $(Format-Tokens $c.Window)" + $(if ($null -ne $pct) { " ($pct%)" } else { '' })
-    $g.DrawString('Finestra di contesto', $fTitle, $bDim, $pad, $y)
+    $g.DrawString($t.context, $fTitle, $bDim, $pad, $y)
     $g.DrawString($ctxRight, $fTitle, $bDim, [single]($cw - $pad), [single]$y, $sfRight)
     $y += 20
     $ctxFrac = if ($null -ne $pct) { Clamp01 ($pct / 100.0) } else { 0 }
@@ -223,11 +254,12 @@ function On-PaintCore {
     $y += 22
   }
 
-  $g.DrawString('Limiti di utilizzo del piano · ritmo', $fTitle, $bDim, $pad, $y)
+  $g.DrawString($t.title, $fTitle, $bDim, $pad, $y)
   $y += 20
 
   foreach ($win in $data.Windows) {
-    $g.DrawString($win.Label, $fName, $bText, $pad, $y)
+    $label = if ($win.Kind -eq 'five_hour') { $t.five } else { $t.seven }
+    $g.DrawString($label, $fName, $bText, $pad, $y)
     $right = (Reset-Text $win) + '   ' + (Format-Percent $win.Percent)
     $g.DrawString($right, $fVal, $bText, [single]($cw - $pad), [single]$y, $sfRight)
     $y += 22
@@ -236,16 +268,16 @@ function On-PaintCore {
     if ($null -ne $win.Elapsed -and -not $win.ResetPassed) {
       $diff = [math]::Round($win.Percent - $win.Elapsed)
       if ([math]::Abs($diff) -lt 1) {
-        $g.DrawString('in linea con il ritmo', $fSmall, $bDim, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString($t.even, $fSmall, $bDim, [single]($cw - $pad), [single]$y, $sfRight)
       } elseif ($diff -gt 0) {
-        $g.DrawString("$diff pt sopra il ritmo", $fSmall, $bRed, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString([string]::Format($t.ahead, $diff), $fSmall, $bRed, [single]($cw - $pad), [single]$y, $sfRight)
       } else {
-        $g.DrawString("$([math]::Abs($diff)) pt sotto il ritmo", $fSmall, $bGreen, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString([string]::Format($t.behind, [math]::Abs($diff)), $fSmall, $bGreen, [single]($cw - $pad), [single]$y, $sfRight)
       }
     } elseif ($null -eq $win.ResetMs) {
-      $g.DrawString('stima non disponibile (reset non comunicato)', $fSmall, $bDim, $pad, $y)
+      $g.DrawString($t.estNA, $fSmall, $bDim, $pad, $y)
     } elseif ($data.IsStale) {
-      $g.DrawString('dati non aggiornati — apri Claude Desktop', $fSmall, $bDim, $pad, $y)
+      $g.DrawString($t.stale, $fSmall, $bDim, $pad, $y)
     }
     $y += 18
   }
@@ -294,7 +326,7 @@ if (-not (Test-Path $IconPath)) {
 }
 $notify = New-Object System.Windows.Forms.NotifyIcon
 $notify.Icon = New-Object System.Drawing.Icon $IconPath
-$notify.Text = 'Claude — limiti di utilizzo'
+$notify.Text = $script:T.tip
 $notify.Visible = $true
 $notify.add_MouseClick({
   param($s, [System.Windows.Forms.MouseEventArgs]$e)
@@ -302,12 +334,12 @@ $notify.add_MouseClick({
 })
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
-$miOpen = $menu.Items.Add('Mostra i limiti')
+$miOpen = $menu.Items.Add($script:T.mShow)
 $miOpen.add_Click({ Show-Popup })
-$miRefresh = $menu.Items.Add('Aggiorna')
+$miRefresh = $menu.Items.Add($script:T.mRefresh)
 $miRefresh.add_Click({ if ($null -ne $script:Form -and $script:Form.Visible) { Show-Popup } })
 [void]$menu.Items.Add('-')
-$miExit = $menu.Items.Add('Esci')
+$miExit = $menu.Items.Add($script:T.mQuit)
 $miExit.add_Click({
   $notify.Visible = $false
   $notify.Dispose()
