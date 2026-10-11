@@ -27,8 +27,11 @@ usato Claude Desktop almeno una volta (così il file dei dati esiste).
 - **Clic fuori** dal popup o **Esc**: lo chiude.
 - **Clic destro**: menu *Mostra i limiti*, *Aggiorna*, *Esci*.
 
-L'icona è l'orologio arancione, vicino all'orologio di Windows (se non la vedi,
-è sotto la freccetta `^` "icone nascoste": trascinala sulla barra per fissarla).
+L'icona mostra **la percentuale del limite di 5 ore** e cambia colore in tempo
+reale secondo il ritmo: **verde** = sotto il ritmo, **rosso** = sopra, **arancione** =
+in linea (o stima non disponibile); `!` = limite raggiunto. Senza dati resta
+l'orologio arancione. Se non la vedi, è sotto la freccetta `^` "icone nascoste":
+trascinala sulla barra per fissarla.
 
 ## Lingua
 

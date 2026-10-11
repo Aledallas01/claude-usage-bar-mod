@@ -342,6 +342,7 @@ $miRefresh.add_Click({ if ($null -ne $script:Form -and $script:Form.Visible) { S
 $miExit = $menu.Items.Add($script:T.mQuit)
 $miExit.add_Click({
   $notify.Visible = $false
+  if ($script:IconHandle -ne [IntPtr]::Zero) { [void][ClaudeTray.Native]::DestroyIcon($script:IconHandle) }
   $notify.Dispose()
   [System.Windows.Forms.Application]::Exit()
 })
@@ -376,6 +377,79 @@ function Update-Tooltip {
   $notify.Text = $text
 }
 
+# --- Icona viva: percentuale del limite di 5 ore, colorata secondo il ritmo ---
+# verde = sotto il ritmo, rosso = sopra, arancione = in linea o stima non
+# disponibile. Senza dati resta l'orologio arancione.
+Add-Type -Namespace ClaudeTray -Name Native -MemberDefinition '[System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool DestroyIcon(System.IntPtr hIcon);'
+$script:BaseIcon = $notify.Icon
+$script:IconKey = 'base'
+$script:IconHandle = [IntPtr]::Zero
+$IcoGreen = [System.Drawing.Color]::FromArgb(46, 160, 67)
+$IcoRed = [System.Drawing.Color]::FromArgb(218, 54, 51)
+$IcoOrange = [System.Drawing.Color]::FromArgb(217, 119, 87)
+
+function Get-PaceColor($w) {
+  if ($null -eq $w.Elapsed -or $w.ResetPassed) { return $IcoOrange }
+  $diff = [math]::Round($w.Percent - $w.Elapsed)
+  if ([math]::Abs($diff) -lt 1) { return $IcoOrange }
+  if ($diff -gt 0) { return $IcoRed }
+  return $IcoGreen
+}
+
+function Update-TrayIcon {
+  $w = $null
+  if ($null -ne $script:Data) { $w = $script:Data.Windows | Where-Object { $_.Kind -eq 'five_hour' } | Select-Object -First 1 }
+  if ($null -eq $w) {
+    if ($script:IconKey -ne 'base') {
+      $notify.Icon = $script:BaseIcon
+      if ($script:IconHandle -ne [IntPtr]::Zero) { [void][ClaudeTray.Native]::DestroyIcon($script:IconHandle) }
+      $script:IconHandle = [IntPtr]::Zero
+      $script:IconKey = 'base'
+    }
+    return
+  }
+  $pct = [int][math]::Round([math]::Max(0, $w.Percent))
+  $color = Get-PaceColor $w
+  $key = "$pct|$($color.ToArgb())"
+  if ($key -eq $script:IconKey) { return }
+
+  # Disegno alla dimensione esatta delle icone piccole (16 px al 100%, 20 al 125%...)
+  $n = [math]::Max(16, [System.Windows.Forms.SystemInformation]::SmallIconSize.Width)
+  $bmp = New-Object System.Drawing.Bitmap $n, $n
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
+  $g.Clear([System.Drawing.Color]::Transparent)
+
+  $r = [single]($n * 0.25)
+  $d = $r * 2
+  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $path.AddArc(0, 0, $d, $d, 180, 90)
+  $path.AddArc(($n - 1 - $d), 0, $d, $d, 270, 90)
+  $path.AddArc(($n - 1 - $d), ($n - 1 - $d), $d, $d, 0, 90)
+  $path.AddArc(0, ($n - 1 - $d), $d, $d, 90, 90)
+  $path.CloseFigure()
+  $bg = New-Object System.Drawing.SolidBrush $color
+  $g.FillPath($bg, $path)
+
+  $txt = if ($pct -ge 100) { '!' } else { [string]$pct }
+  $px = if ($txt.Length -ge 2) { $n * 0.64 } else { $n * 0.78 }
+  $font = New-Object System.Drawing.Font('Segoe UI', [single]$px, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $sf = New-Object System.Drawing.StringFormat
+  $sf.Alignment = [System.Drawing.StringAlignment]::Center
+  $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+  $rect = New-Object System.Drawing.RectangleF(0, [single]($n * 0.03), [single]$n, [single]$n)
+  $g.DrawString($txt, $font, [System.Drawing.Brushes]::White, $rect, $sf)
+
+  $h = $bmp.GetHicon()
+  $notify.Icon = [System.Drawing.Icon]::FromHandle($h)
+  if ($script:IconHandle -ne [IntPtr]::Zero) { [void][ClaudeTray.Native]::DestroyIcon($script:IconHandle) }
+  $script:IconHandle = $h
+  $script:IconKey = $key
+
+  $font.Dispose(); $sf.Dispose(); $bg.Dispose(); $path.Dispose(); $g.Dispose(); $bmp.Dispose()
+}
+
 function Refresh-Live([bool]$force) {
   $stamp = Get-StoreStamp
   $nowTicks = [DateTime]::UtcNow.Ticks
@@ -385,6 +459,9 @@ function Refresh-Live([bool]$force) {
   $script:LastFull = $nowTicks
   $script:Data = Get-LimitsData
   Update-Tooltip
+  try { Update-TrayIcon } catch {
+    ("[{0}] ICON: {1}" -f (Get-Date), $_.Exception.Message) | Out-File -Append -Encoding utf8 $script:LogFile
+  }
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
     $h = if ($null -ne $script:Data) { Measure-PopupHeight $script:Data } else { 70 }
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
@@ -396,7 +473,11 @@ function Refresh-Live([bool]$force) {
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1000
-$timer.add_Tick({ try { Refresh-Live $false } catch { } })
+$timer.add_Tick({
+  try { Refresh-Live $false } catch {
+    ("[{0}] LIVE: {1}" -f (Get-Date), $_.Exception.Message) | Out-File -Append -Encoding utf8 $script:LogFile
+  }
+})
 $timer.Start()
 Refresh-Live $true
 
