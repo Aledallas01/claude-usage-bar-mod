@@ -1,6 +1,6 @@
 {
   "name": "usage-time-bar",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": { "name": "bookst" },
   "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra.",
   "types": "./types/index.d.ts",
@@ -35,6 +35,12 @@
       "title": "Aggiornamento (secondi)",
       "description": "Ogni quanto rileggere i limiti (anche quelli salvati da altre sessioni) e ricalcolare il tempo trascorso (minimo 5).",
       "default": 10
+    },
+    "serverRefreshSeconds": {
+      "type": "number",
+      "title": "Lettura dal server (secondi)",
+      "description": "Ogni quanto leggere i limiti dal server, come il popup di Claude (minimo 30; 0 = solo dalle risposte di Claude).",
+      "default": 60
     },
     "fiveHourWindowHours": {
       "type": "number",

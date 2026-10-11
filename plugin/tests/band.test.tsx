@@ -35,6 +35,8 @@ function engineBeneath(on: On, rateLimits: SessionRateLimit[] = LIMITS) {
     value: { startedAt: NOW, context: { window: 1_000_000, tokens: 307_600, percent: 31 }, rateLimits },
   }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
+  // Nessun accesso con abbonamento: niente lettura dal server in questi test.
+  on('session.authorize', () => ({ value: null }))
   on('ui.status', () => ({ value: undefined }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'it', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.open', ($, e) => {

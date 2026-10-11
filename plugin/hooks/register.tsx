@@ -1,6 +1,7 @@
 // Usage Time Bar: affianca all'utilizzo reale dei limiti di 5 ore e 7 giorni la
-// progressione temporale teorica della finestra. Legge soltanto i dati che il
-// motore già riceve; non modifica richieste, quote né valori mostrati da Claude.
+// progressione temporale teorica della finestra. Legge i limiti dal motore e
+// dal server (come il popup di Claude); non modifica richieste, quote né valori
+// mostrati da Claude.
 
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
@@ -11,6 +12,7 @@ import type { Config } from './lib/config'
 import { dict, normalizeLang } from './lib/i18n'
 import type { Lang } from './lib/i18n'
 import { accessibleSummary, contextText, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
+import { mergeWindows, parseServerUsage, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
 import { describeWindows, pickWindows } from './lib/windows'
 
 const limits = atom({ plugin: 'usage-time-bar', key: 'limits' } as const, null)
@@ -56,6 +58,8 @@ async function detectLang($: EngineInterface, config: Config): Promise<Lang> {
 
 const STORE_LIMITS = 'lastLimits'
 const STORE_HIDDEN = 'isHidden'
+const STORE_SERVER_AT = 'serverFetchedAt'
+const STORE_SERVER_STATUS = 'serverStatus'
 
 function parseContext(value: unknown): StoredContext | undefined {
   if (value === null || typeof value !== 'object') return undefined
@@ -88,15 +92,53 @@ async function refreshStatus($: EngineInterface, config: Config) {
   $.ui.status(statusText(describeWindows(stored.windows, await $.clock.now(), config.durations)))
 }
 
-/** Impronta delle finestre: dice se una lettura della sessione è davvero nuova. */
 function signature(windows: StoredLimits['windows']): string {
   return JSON.stringify(windows.map(w => [w.kind, w.percentUsed, w.resetsAt ?? null]))
 }
 
-// Ultima lettura dei limiti arrivata a questa sessione dal motore. Una lettura
-// uguale alla precedente non è un dato nuovo: rimetterla nello store con l'ora
-// attuale cancellerebbe un dato più recente scritto da un'altra sessione.
-let lastOwnSignature: string | undefined
+/**
+ * Unisce una lettura (`incoming`) a quella mostrata e a quella salvata dalle
+ * altre sessioni, finestra per finestra (mergeWindows: dentro una finestra
+ * vince l'utilizzo più alto, quindi una fonte in ritardo non riporta indietro
+ * la percentuale). `isFresh`: lettura appena confermata dal server, che
+ * aggiorna l'ora del dato anche se i valori non cambiano.
+ */
+async function adopt(
+  $: EngineInterface,
+  incoming: StoredLimits['windows'],
+  ownContext: StoredContext | undefined,
+  isFresh = false,
+) {
+  let saved: StoredLimits | null = null
+  try {
+    saved = parseStored(await $.store.get(STORE_LIMITS))
+  } catch {
+    // Store illeggibile in questo istante: unisco solo ciò che ho.
+  }
+  const current = await read($, limits)
+  const windows = mergeWindows(mergeWindows(current?.windows ?? [], saved?.windows ?? []), incoming)
+  if (windows.length === 0) return
+  const sig = signature(windows)
+  const now = await $.clock.now()
+  // Ora del dato: adesso se porta qualcosa che lo store non ha ancora (o se il
+  // server l'ha appena confermato), altrimenti quella già nota.
+  const isNew = isFresh || saved === null || sig !== signature(saved.windows)
+  const known = Math.max(current?.observedAt ?? 0, saved?.observedAt ?? 0)
+  const next: StoredLimits = { observedAt: isNew ? now : known, windows }
+  // Il contesto è della sessione viva, mai quello salvato da un'altra.
+  const context = ownContext ?? current?.context
+  if (context !== undefined) next.context = context
+  if (current === null || JSON.stringify(next) !== JSON.stringify(current)) await update($, limits, () => next)
+  if (saved === null || sig !== signature(saved.windows) || next.observedAt > saved.observedAt) {
+    await $.store.set(STORE_LIMITS, next)
+  }
+}
+
+function ownContextOf(context: SessionContextUsage | undefined): StoredContext | undefined {
+  const parsed = parseContext(context)
+
+  return parsed !== undefined && parsed.tokens !== undefined ? parsed : undefined
+}
 
 async function remember(
   $: EngineInterface,
@@ -104,57 +146,66 @@ async function remember(
   rateLimits: readonly SessionRateLimit[],
   context: SessionContextUsage | undefined,
 ) {
-  // Il contesto è della sessione viva, mai quello salvato da un'altra.
-  const parsed = parseContext(context)
-  const ownContext = parsed !== undefined && parsed.tokens !== undefined ? parsed : undefined
-  const windows = pickWindows(rateLimits)
-  const sig = signature(windows)
-  if (windows.length > 0 && sig !== lastOwnSignature) {
-    lastOwnSignature = sig
-    const stored: StoredLimits = { observedAt: await $.clock.now(), windows }
-    if (ownContext !== undefined) stored.context = ownContext
-    await update($, limits, () => stored)
-    await $.store.set(STORE_LIMITS, stored)
-  } else if (ownContext !== undefined) {
-    // Solo il contesto è cambiato: i limiti restano i più recenti noti.
-    await update($, limits, current => (current === null ? null : { ...current, context: ownContext }))
-  }
+  await adopt($, pickWindows(rateLimits), ownContextOf(context))
   await refreshStatus($, config)
 }
 
 /**
- * Tempo reale tra sessioni: i limiti sono dell'account, non della sessione.
- * Se un'altra sessione (un'altra scheda Code, un terminale) ha salvato una
- * lettura più recente, questa la adotta subito, senza attendere la prossima
- * risposta di Claude. Il contesto resta quello di questa sessione.
+ * Legge i limiti dal server, come fa il popup di Claude: si aggiornano anche
+ * senza risposte e includono il consumo da claude.ai. Tra più sessioni aperte
+ * interroga una sola volta per intervallo; le altre lo prendono dallo store.
  */
-async function syncFromStore($: EngineInterface) {
-  const saved = parseStored(await $.store.get(STORE_LIMITS))
-  if (saved === null) return
-  await update($, limits, current => {
-    if (current !== null && saved.observedAt <= current.observedAt) return current
-    const adopted: StoredLimits = { observedAt: saved.observedAt, windows: saved.windows }
-    if (current?.context !== undefined) adopted.context = current.context
-
-    return adopted
-  })
+async function fetchServer($: EngineInterface, config: Config) {
+  if (config.serverRefreshSeconds === 0) return
+  const now = await $.clock.now()
+  const last = await $.store.get(STORE_SERVER_AT)
+  if (typeof last === 'number' && now - last < config.serverRefreshSeconds * 900) return
+  await $.store.set(STORE_SERVER_AT, now)
+  const auth = await $.session.authorize()
+  if (auth === null || auth.kind !== 'bearer') {
+    await $.store.set(STORE_SERVER_STATUS, { at: now, error: 'nessun accesso con abbonamento' })
+    return
+  }
+  const res = await $.http.fetch(USAGE_URL, { headers: USAGE_HEADERS, auth: auth.handle })
+  await $.store.set(STORE_SERVER_STATUS, { at: now, status: res.status })
+  if (!res.ok) return
+  const windows = pickWindows(parseServerUsage(res.text))
+  if (windows.length > 0) await adopt($, windows, undefined, true)
+  await refreshStatus($, config)
 }
 
 async function tick($: EngineInterface, config: Config) {
+  // Una sola unione per giro: la lettura della sessione (se c'è) più quella
+  // salvata dalle altre sessioni e dal server.
+  let windows: StoredLimits['windows'] = []
+  let context: StoredContext | undefined
   try {
     const usage = await $.session.usage()
-    await remember($, config, usage.rateLimits, usage.context)
+    windows = pickWindows(usage.rateLimits)
+    context = ownContextOf(usage.context)
   } catch {
-    // Lettura non disponibile in questo momento: riprovo al prossimo giro.
+    // Lettura non disponibile in questo momento: unisco solo lo store.
   }
   try {
-    await syncFromStore($)
+    await adopt($, windows, context)
   } catch {
     // Store illeggibile in questo istante: riprovo al prossimo giro.
   }
   const now = await $.clock.now()
   await update($, clockNow, () => now)
   await refreshStatus($, config)
+}
+
+async function serverTick($: EngineInterface, config: Config) {
+  try {
+    await fetchServer($, config)
+  } catch (err) {
+    try {
+      await $.store.set(STORE_SERVER_STATUS, { at: await $.clock.now(), error: String(err).slice(0, 200) })
+    } catch {
+      // niente da fare: riprovo al prossimo intervallo.
+    }
+  }
 }
 
 // Apre il riquadro come un popup: prende la tastiera (focus), così il motore
@@ -188,15 +239,6 @@ export const register: Register = (on, options) => {
       description: d.cmdDescription,
       argumentHint: d.cmdArgHint,
     })
-    try {
-      await syncFromStore($)
-    } catch {
-      // Nessun dato salvato leggibile: arriverà con session.measure.
-    }
-    // Dopo un ricaricamento l'impronta riparte da ciò che è già mostrato, così
-    // una lettura vecchia della sessione non scavalca un dato più recente.
-    const shown = await read($, limits)
-    if (shown !== null) lastOwnSignature = signature(shown.windows)
     // La fascia segue la scelta salvata con /usage-time mostra|nascondi, se c'è.
     const saved = await $.store.get(STORE_HIDDEN)
     const hidden = typeof saved === 'boolean' ? saved : !config.showBand
@@ -205,6 +247,10 @@ export const register: Register = (on, options) => {
     // Prima lettura subito (session.usage + store), poi a ogni giro.
     await tick($, config)
     $.clock.every(config.refreshSeconds * 1000, () => void tick($, config))
+    if (config.serverRefreshSeconds > 0) {
+      void serverTick($, config)
+      $.clock.every(config.serverRefreshSeconds * 1000, () => void serverTick($, config))
+    }
 
     return next(e)
   })

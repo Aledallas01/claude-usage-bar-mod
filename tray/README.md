@@ -13,8 +13,10 @@ di contesto) in `~\.claude\plugins\store\usage-time-bar_*.json`. Il tray legge
 quel file. Quindi:
 
 - nessuna richiesta di rete, nessuna credenziale, nessuna modifica a Claude;
-- i dati si aggiornano quando la mod li aggiorna, cioè **mentre usi Claude
-  Desktop**. Se Claude è chiuso da un po', il popup mostra "Dati non aggiornati".
+- i dati si aggiornano in tempo reale: ogni secondo il programma controlla se
+  la mod ha riscritto il file e ricarica subito; passando il mouse sull'icona
+  vedi le percentuali (`Claude · 5h 21% · 7d 32%`). La mod aggiorna il file
+  **mentre Claude Desktop è aperto**. Se Claude è chiuso da un po', il popup mostra "Dati non aggiornati".
 
 Perciò il tray richiede che la mod `usage-time-bar` sia installata e che tu abbia
 usato Claude Desktop almeno una volta (così il file dei dati esiste).

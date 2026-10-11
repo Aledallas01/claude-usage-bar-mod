@@ -12,6 +12,8 @@ export type Config = {
   showButton: boolean
   showStatus: boolean
   refreshSeconds: number
+  /** Ogni quanto leggere i limiti dal server; 0 = mai (solo dalle risposte). */
+  serverRefreshSeconds: number
   durations: Record<WindowKind, number>
 }
 
@@ -28,6 +30,7 @@ export function readConfig(options: PluginOptions | undefined): Config {
     showButton: o.showButton !== false,
     showStatus: o.showStatus === true,
     refreshSeconds: Math.max(5, positive(o.refreshSeconds, 10)),
+    serverRefreshSeconds: o.serverRefreshSeconds === 0 ? 0 : Math.max(30, positive(o.serverRefreshSeconds, 60)),
     durations: {
       five_hour: positive(o.fiveHourWindowHours, 0) * 3_600_000 || DEFAULT_DURATIONS_MS.five_hour,
       seven_day: positive(o.sevenDayWindowDays, 0) * 86_400_000 || DEFAULT_DURATIONS_MS.seven_day,

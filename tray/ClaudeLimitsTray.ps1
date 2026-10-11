@@ -347,20 +347,58 @@ $miExit.add_Click({
 })
 $notify.ContextMenuStrip = $menu
 
-# Aggiorna il popup mentre è aperto
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 15000
-$timer.add_Tick({
+# Tempo reale: ogni secondo controlla se la mod ha riscritto il file dei dati
+# (basta l'ora di modifica, nessuna lettura) e in quel caso ricarica subito;
+# ogni 15 s ricarica comunque, per far avanzare il tempo trascorso.
+$script:LastStamp = 0L
+$script:LastFull = 0L
+
+function Get-StoreStamp {
+  if (-not (Test-Path $StoreDir)) { return 0L }
+  $f = Get-ChildItem $StoreDir -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -like 'usage-time-bar_*.json' } |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($null -eq $f) { return 0L }
+  return $f.LastWriteTimeUtc.Ticks
+}
+
+function Update-Tooltip {
+  $text = $script:T.tip
+  if ($null -ne $script:Data) {
+    $parts = foreach ($w in $script:Data.Windows) {
+      $name = if ($w.Kind -eq 'five_hour') { '5h' } else { '7d' }
+      "$name $(Format-Percent $w.Percent)"
+    }
+    $text = 'Claude · ' + ($parts -join ' · ')
+  }
+  # NotifyIcon.Text accetta al massimo 63 caratteri.
+  if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }
+  $notify.Text = $text
+}
+
+function Refresh-Live([bool]$force) {
+  $stamp = Get-StoreStamp
+  $nowTicks = [DateTime]::UtcNow.Ticks
+  $periodic = ($nowTicks - $script:LastFull) -ge [TimeSpan]::FromSeconds(15).Ticks
+  if (-not $force -and $stamp -eq $script:LastStamp -and -not $periodic) { return }
+  $script:LastStamp = $stamp
+  $script:LastFull = $nowTicks
+  $script:Data = Get-LimitsData
+  Update-Tooltip
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
-    $script:Data = Get-LimitsData
     $h = if ($null -ne $script:Data) { Measure-PopupHeight $script:Data } else { 70 }
     $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
     $script:Form.Height = $h
     $script:Form.Top = $wa.Bottom - $script:Form.Height - 8
     $script:Form.Invalidate()
   }
-})
+}
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 1000
+$timer.add_Tick({ try { Refresh-Live $false } catch { } })
 $timer.Start()
+Refresh-Live $true
 
 $ctx = New-Object System.Windows.Forms.ApplicationContext
 [System.Windows.Forms.Application]::Run($ctx)
