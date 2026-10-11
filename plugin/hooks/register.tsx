@@ -88,24 +88,70 @@ async function refreshStatus($: EngineInterface, config: Config) {
   $.ui.status(statusText(describeWindows(stored.windows, await $.clock.now(), config.durations)))
 }
 
+/** Impronta delle finestre: dice se una lettura della sessione è davvero nuova. */
+function signature(windows: StoredLimits['windows']): string {
+  return JSON.stringify(windows.map(w => [w.kind, w.percentUsed, w.resetsAt ?? null]))
+}
+
+// Ultima lettura dei limiti arrivata a questa sessione dal motore. Una lettura
+// uguale alla precedente non è un dato nuovo: rimetterla nello store con l'ora
+// attuale cancellerebbe un dato più recente scritto da un'altra sessione.
+let lastOwnSignature: string | undefined
+
 async function remember(
   $: EngineInterface,
   config: Config,
   rateLimits: readonly SessionRateLimit[],
   context: SessionContextUsage | undefined,
 ) {
-  const windows = pickWindows(rateLimits)
-  if (windows.length === 0) return
-  const stored: StoredLimits = { observedAt: await $.clock.now(), windows }
-  // Il contesto è della sessione viva, mai quello salvato da una precedente.
+  // Il contesto è della sessione viva, mai quello salvato da un'altra.
   const parsed = parseContext(context)
-  if (parsed !== undefined && parsed.tokens !== undefined) stored.context = parsed
-  await update($, limits, () => stored)
-  await $.store.set(STORE_LIMITS, stored)
+  const ownContext = parsed !== undefined && parsed.tokens !== undefined ? parsed : undefined
+  const windows = pickWindows(rateLimits)
+  const sig = signature(windows)
+  if (windows.length > 0 && sig !== lastOwnSignature) {
+    lastOwnSignature = sig
+    const stored: StoredLimits = { observedAt: await $.clock.now(), windows }
+    if (ownContext !== undefined) stored.context = ownContext
+    await update($, limits, () => stored)
+    await $.store.set(STORE_LIMITS, stored)
+  } else if (ownContext !== undefined) {
+    // Solo il contesto è cambiato: i limiti restano i più recenti noti.
+    await update($, limits, current => (current === null ? null : { ...current, context: ownContext }))
+  }
   await refreshStatus($, config)
 }
 
+/**
+ * Tempo reale tra sessioni: i limiti sono dell'account, non della sessione.
+ * Se un'altra sessione (un'altra scheda Code, un terminale) ha salvato una
+ * lettura più recente, questa la adotta subito, senza attendere la prossima
+ * risposta di Claude. Il contesto resta quello di questa sessione.
+ */
+async function syncFromStore($: EngineInterface) {
+  const saved = parseStored(await $.store.get(STORE_LIMITS))
+  if (saved === null) return
+  await update($, limits, current => {
+    if (current !== null && saved.observedAt <= current.observedAt) return current
+    const adopted: StoredLimits = { observedAt: saved.observedAt, windows: saved.windows }
+    if (current?.context !== undefined) adopted.context = current.context
+
+    return adopted
+  })
+}
+
 async function tick($: EngineInterface, config: Config) {
+  try {
+    const usage = await $.session.usage()
+    await remember($, config, usage.rateLimits, usage.context)
+  } catch {
+    // Lettura non disponibile in questo momento: riprovo al prossimo giro.
+  }
+  try {
+    await syncFromStore($)
+  } catch {
+    // Store illeggibile in questo istante: riprovo al prossimo giro.
+  }
   const now = await $.clock.now()
   await update($, clockNow, () => now)
   await refreshStatus($, config)
@@ -142,21 +188,21 @@ export const register: Register = (on, options) => {
       description: d.cmdDescription,
       argumentHint: d.cmdArgHint,
     })
-    if ((await read($, limits)) === null) {
-      const saved = parseStored(await $.store.get(STORE_LIMITS))
-      if (saved !== null) await update($, limits, () => saved)
+    try {
+      await syncFromStore($)
+    } catch {
+      // Nessun dato salvato leggibile: arriverà con session.measure.
     }
+    // Dopo un ricaricamento l'impronta riparte da ciò che è già mostrato, così
+    // una lettura vecchia della sessione non scavalca un dato più recente.
+    const shown = await read($, limits)
+    if (shown !== null) lastOwnSignature = signature(shown.windows)
     // La fascia segue la scelta salvata con /usage-time mostra|nascondi, se c'è.
     const saved = await $.store.get(STORE_HIDDEN)
     const hidden = typeof saved === 'boolean' ? saved : !config.showBand
     await update($, isHidden, () => hidden)
     await update($, isPaneOpen, () => false)
-    try {
-      const usage = await $.session.usage()
-      await remember($, config, usage.rateLimits, usage.context)
-    } catch {
-      // Nessuna lettura ancora disponibile: arriverà con session.measure.
-    }
+    // Prima lettura subito (session.usage + store), poi a ogni giro.
     await tick($, config)
     $.clock.every(config.refreshSeconds * 1000, () => void tick($, config))
 

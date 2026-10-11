@@ -27,7 +27,7 @@ export function readConfig(options: PluginOptions | undefined): Config {
     showBand: o.showBand === true,
     showButton: o.showButton !== false,
     showStatus: o.showStatus === true,
-    refreshSeconds: Math.max(5, positive(o.refreshSeconds, 30)),
+    refreshSeconds: Math.max(5, positive(o.refreshSeconds, 10)),
     durations: {
       five_hour: positive(o.fiveHourWindowHours, 0) * 3_600_000 || DEFAULT_DURATIONS_MS.five_hour,
       seven_day: positive(o.sevenDayWindowDays, 0) * 86_400_000 || DEFAULT_DURATIONS_MS.seven_day,

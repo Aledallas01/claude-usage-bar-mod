@@ -1,6 +1,6 @@
 {
   "name": "usage-time-bar",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": { "name": "bookst" },
   "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra.",
   "types": "./types/index.d.ts",
@@ -33,8 +33,8 @@
     "refreshSeconds": {
       "type": "number",
       "title": "Aggiornamento (secondi)",
-      "description": "Ogni quanto ricalcolare il tempo trascorso (minimo 5).",
-      "default": 30
+      "description": "Ogni quanto rileggere i limiti (anche quelli salvati da altre sessioni) e ricalcolare il tempo trascorso (minimo 5).",
+      "default": 10
     },
     "fiveHourWindowHours": {
       "type": "number",

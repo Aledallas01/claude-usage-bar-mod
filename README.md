@@ -51,6 +51,15 @@ Casi speciali: senza orario di reset → **"Stima non disponibile"**; reset già
 passato → "Reset già avvenuto: in attesa di dati aggiornati" (nessuna
 progressione inventata).
 
+**Tempo reale.** Le percentuali si aggiornano a ogni risposta di Claude e,
+ogni `refreshSeconds` (10 s), la mod rilegge i limiti: se un'altra sessione
+aperta (un'altra scheda Code, un terminale) ha ricevuto una lettura più
+recente, tutte le sessioni la mostrano subito, senza attendere la propria
+prossima risposta. I limiti sono dell'account; il contesto resta quello di
+ciascuna sessione. Il consumo fatto fuori da Claude Code (claude.ai, app)
+compare alla prossima risposta di una qualsiasi sessione: alle mod non arriva
+altro dato dei limiti.
+
 Comando: `/usage-time` (apre il popup e scrive il riepilogo), `/usage-time mostra` /
 `/usage-time nascondi` (fascia fissa sopra il prompt).
 
@@ -131,7 +140,7 @@ Opzioni del plugin (menu `/config` della scheda Code, o `claude plugin configure
 | `showButton` | `true` | pulsante ⏱ nel piede del prompt che apre il popup |
 | `showBand` | `false` | barre sempre visibili sopra il prompt (anche `/usage-time mostra`) |
 | `showStatus` | `false` | riepilogo compatto `5h 42% ⏱50% · 7d 18% ⏱43%` nella riga di stato |
-| `refreshSeconds` | `30` | intervallo di ricalcolo del tempo trascorso (min. 5) |
+| `refreshSeconds` | `10` | ogni quanto rileggere i limiti (anche da altre sessioni) e ricalcolare il tempo trascorso (min. 5) |
 | `fiveHourWindowHours` | `5` | durata usata per stimare l'inizio della finestra `five_hour` |
 | `sevenDayWindowDays` | `7` | durata usata per stimare l'inizio della finestra `seven_day` |
 
