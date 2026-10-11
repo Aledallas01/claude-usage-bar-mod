@@ -1,0 +1,4 @@
+' Avvia il programma senza far comparire la finestra nera di PowerShell.
+Set sh = CreateObject("WScript.Shell")
+scriptDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
+sh.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & scriptDir & "ClaudeLimitsTray.ps1""", 0, False

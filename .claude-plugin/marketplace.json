@@ -1,0 +1,12 @@
+{
+  "name": "usage-time-bar-local",
+  "owner": { "name": "bookst" },
+  "metadata": { "description": "Marketplace locale della mod Usage Time Bar per Claude Desktop." },
+  "plugins": [
+    {
+      "name": "usage-time-bar",
+      "source": "./plugin",
+      "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra."
+    }
+  ]
+}

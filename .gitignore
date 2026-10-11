@@ -1,0 +1,9 @@
+# Backup locali delle impostazioni dell'utente (creati da scripts\install.ps1):
+# contengono dati personali, NON vanno pubblicati.
+backup/
+
+# Log ed elementi temporanei
+*.log
+node_modules/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,45 @@
+{
+  "name": "usage-time-bar",
+  "version": "0.3.1",
+  "author": { "name": "bookst" },
+  "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra.",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "showButton": {
+      "type": "boolean",
+      "title": "Pulsante del ritmo nel piede del prompt",
+      "description": "Mostra accanto all'indicatore dei limiti un pulsante che apre il popup con le barre.",
+      "default": true
+    },
+    "showBand": {
+      "type": "boolean",
+      "title": "Mostra le barre anche sopra il prompt",
+      "description": "Disegna sempre le barre sopra il prompt, oltre al popup (attivabile anche con /usage-time mostra).",
+      "default": false
+    },
+    "showStatus": {
+      "type": "boolean",
+      "title": "Mostra il riepilogo nella riga di stato",
+      "description": "Aggiunge una voce compatta (5h 42% ⏱60% · 7d 18% ⏱35%) alla riga di stato.",
+      "default": false
+    },
+    "refreshSeconds": {
+      "type": "number",
+      "title": "Aggiornamento (secondi)",
+      "description": "Ogni quanto ricalcolare il tempo trascorso (minimo 5).",
+      "default": 30
+    },
+    "fiveHourWindowHours": {
+      "type": "number",
+      "title": "Durata finestra breve (ore)",
+      "description": "Usata solo per stimare l'inizio della finestra five_hour quando Claude comunica soltanto il reset.",
+      "default": 5
+    },
+    "sevenDayWindowDays": {
+      "type": "number",
+      "title": "Durata finestra settimanale (giorni)",
+      "description": "Usata solo per stimare l'inizio della finestra seven_day quando Claude comunica soltanto il reset.",
+      "default": 7
+    }
+  }
+}
