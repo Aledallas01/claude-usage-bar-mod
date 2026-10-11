@@ -27,11 +27,15 @@ usato Claude Desktop almeno una volta (così il file dei dati esiste).
 - **Clic fuori** dal popup o **Esc**: lo chiude.
 - **Clic destro**: menu *Mostra i limiti*, *Aggiorna*, *Esci*.
 
-L'icona mostra **la percentuale del limite di 5 ore** e cambia colore in tempo
-reale secondo il ritmo: **verde** = sotto il ritmo, **rosso** = sopra, **arancione** =
-in linea (o stima non disponibile); `!` = limite raggiunto. Senza dati resta
-l'orologio arancione. Se non la vedi, è sotto la freccetta `^` "icone nascoste":
-trascinala sulla barra per fissarla.
+L'icona è l'orologio di sempre, ma il colore cambia in tempo reale confrontando
+l'utilizzo del limite di 5 ore con il tempo trascorso:
+
+- **verde**: più di 5 punti sotto il ritmo;
+- **arancione**: da 0 a 5 punti sotto il ritmo (o stima non disponibile);
+- **rosso**: sopra il ritmo.
+
+Se non la vedi, è sotto la freccetta `^` "icone nascoste": trascinala sulla
+barra per fissarla.
 
 ## Lingua
 
