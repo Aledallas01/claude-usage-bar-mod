@@ -307,6 +307,34 @@ describe('tratto verde / rosso rispetto al ritmo', () => {
     await ui.unmount()
   })
 
+  test('sotto il ritmo di 0–5 punti: arancione (avviso), non verde', BAND_ON, async ($, on) => {
+    engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 47 }, LIMITS[1]!]) // 3 pt sotto il 50%
+    await start($)
+    const { ui, svg } = await firstSvg($)
+    expect(svg.includes('class="near" x="188.00" y="2" width="12.00"')).toBe(true)
+    expect(svg.includes('class="under"')).toBe(false)
+    expect((await ui.find({ type: 'Text', text: '3 pt sotto il ritmo' }))?.props.color).toBe('warning')
+    await ui.unmount()
+  })
+
+  test('appena sopra il ritmo è già rosso', BAND_ON, async ($, on) => {
+    engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 52 }, LIMITS[1]!])
+    await start($)
+    const { ui } = await firstSvg($)
+    expect((await ui.find({ type: 'Text', text: '2 pt sopra il ritmo' }))?.props.color).toBe('error')
+    await ui.unmount()
+  })
+
+  test('pulsante: rosso sopra, arancione 0–5 pt sotto, verde oltre', async ($, on) => {
+    // 5 h: 52% su 50% (sopra) · 7 giorni: 40% su 42.9% (2.9 pt sotto)
+    engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 52 }, { ...LIMITS[1]!, percentUsed: 40 }])
+    await start($)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+    expect((await ui.find({ type: 'Text', text: /5h 52%/ }))?.props.color).toBe('error')
+    expect((await ui.find({ type: 'Text', text: /7d 40%/ }))?.props.color).toBe('warning')
+    await ui.unmount()
+  })
+
   test('terminale: il tratto oltre il ritmo è rosso', BAND_ON, async ($, on) => {
     engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 70 }])
     await start($)

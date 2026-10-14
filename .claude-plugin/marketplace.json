@@ -1,7 +1,7 @@
 {
-  "name": "usage-time-bar-local",
+  "name": "usage-time-bar",
   "owner": { "name": "bookst" },
-  "metadata": { "description": "Marketplace locale della mod Usage Time Bar per Claude Desktop." },
+  "metadata": { "description": "Usage Time Bar per Claude Code: ritmo dei limiti di 5 ore e 7 giorni." },
   "plugins": [
     {
       "name": "usage-time-bar",

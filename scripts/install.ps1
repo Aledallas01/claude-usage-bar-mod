@@ -20,8 +20,8 @@ Invoke-Claude $cli.Path @('plugin', 'validate', $PluginDir)
 
 $backup = New-ConfigBackup
 
-$known = & $cli.Path plugin marketplace list 2>$null | Out-String
-if ($known -notmatch [regex]::Escape($MarketplaceName)) {
+[void](Remove-LegacyInstall $cli.Path)
+if (-not (Test-Marketplace $cli.Path $MarketplaceName)) {
   Invoke-Claude $cli.Path @('plugin', 'marketplace', 'add', $ProjectRoot, '--scope', 'user')
 }
 Invoke-Claude $cli.Path @('plugin', 'install', $PluginId, '--scope', 'user')

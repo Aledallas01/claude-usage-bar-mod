@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 #
 # Le sessioni della scheda Code caricano all'avvio la copia in
-# ~\.claude\plugins\cache\usage-time-bar-local\usage-time-bar\<versione>\.
+# ~\.claude\plugins\cache\usage-time-bar\usage-time-bar\<versione>\.
 # Dopo una modifica al codice: alza "version" in plugin\.claude-plugin\plugin.json,
 # esegui questo script, poi apri una nuova sessione (o /reload-plugins).
 
@@ -19,7 +19,14 @@ Invoke-Claude $cli.Path @('plugin', 'validate', $PluginDir)
 
 $manifest = Get-Content (Join-Path $PluginDir '.claude-plugin\plugin.json') -Raw | ConvertFrom-Json
 $version = [string]$manifest.version
-$cacheDir = Join-Path $env:USERPROFILE ".claude\plugins\cache\usage-time-bar-local\usage-time-bar\$version"
+$cacheDir = Join-Path $env:USERPROFILE ".claude\plugins\cache\$MarketplaceName\usage-time-bar\$version"
+
+# Installazione con il vecchio nome del marketplace: la rifà con il nuovo.
+if (Remove-LegacyInstall $cli.Path) {
+  New-ConfigBackup | Out-Null
+  Invoke-Claude $cli.Path @('plugin', 'marketplace', 'add', $ProjectRoot, '--scope', 'user')
+  Invoke-Claude $cli.Path @('plugin', 'install', $PluginId, '--scope', 'user')
+}
 
 Invoke-Claude $cli.Path @('plugin', 'update', $PluginId)
 

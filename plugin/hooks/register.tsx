@@ -12,7 +12,7 @@ import type { Config } from './lib/config'
 import { dict, normalizeLang } from './lib/i18n'
 import type { Lang } from './lib/i18n'
 import { accessibleSummary, contextText, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
-import { mergeWindows, parseServerUsage, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
+import { mergeWindows, parseServerUsage, retryAfterMs, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
 import { describeWindows, pickWindows } from './lib/windows'
 
 const limits = atom({ plugin: 'usage-time-bar', key: 'limits' } as const, null)
@@ -60,6 +60,20 @@ const STORE_LIMITS = 'lastLimits'
 const STORE_HIDDEN = 'isHidden'
 const STORE_SERVER_AT = 'serverFetchedAt'
 const STORE_SERVER_STATUS = 'serverStatus'
+const STORE_SERVER_BACKOFF = 'serverBackoff'
+
+/** Pausa dopo un rifiuto del server (429/5xx): raddoppia fino a 30 minuti. */
+const BACKOFF_MIN_MS = 2 * 60_000
+const BACKOFF_MAX_MS = 30 * 60_000
+
+type Backoff = { until: number; delayMs: number }
+
+function parseBackoff(value: unknown): Backoff | undefined {
+  if (value === null || typeof value !== 'object') return undefined
+  const { until, delayMs } = value as Partial<Backoff>
+
+  return typeof until === 'number' && typeof delayMs === 'number' ? { until, delayMs } : undefined
+}
 
 function parseContext(value: unknown): StoredContext | undefined {
   if (value === null || typeof value !== 'object') return undefined
@@ -160,6 +174,8 @@ async function fetchServer($: EngineInterface, config: Config) {
   const now = await $.clock.now()
   const last = await $.store.get(STORE_SERVER_AT)
   if (typeof last === 'number' && now - last < config.serverRefreshSeconds * 900) return
+  const backoff = parseBackoff(await $.store.get(STORE_SERVER_BACKOFF))
+  if (backoff !== undefined && now < backoff.until) return
   await $.store.set(STORE_SERVER_AT, now)
   const auth = await $.session.authorize()
   if (auth === null || auth.kind !== 'bearer') {
@@ -168,7 +184,18 @@ async function fetchServer($: EngineInterface, config: Config) {
   }
   const res = await $.http.fetch(USAGE_URL, { headers: USAGE_HEADERS, auth: auth.handle })
   await $.store.set(STORE_SERVER_STATUS, { at: now, status: res.status })
+  if (res.status === 429 || res.status >= 500) {
+    // Il server chiede di rallentare: aspetto quanto dice, o raddoppio la pausa.
+    const delayMs = Math.min(BACKOFF_MAX_MS, Math.max(BACKOFF_MIN_MS, (backoff?.delayMs ?? BACKOFF_MIN_MS / 2) * 2))
+    const wait = retryAfterMs(res.headers['retry-after'], now) ?? delayMs
+    await $.store.set(STORE_SERVER_BACKOFF, { until: now + Math.min(BACKOFF_MAX_MS, wait), delayMs })
+    return
+  }
+  if (backoff !== undefined) await $.store.delete(STORE_SERVER_BACKOFF)
   if (!res.ok) return
+  // Risposta grezza (solo percentuali e date, nessuna credenziale): serve a
+  // leggere i campi che la mod non interpreta ancora.
+  await $.store.set('serverRaw', res.text.slice(0, 20_000))
   const windows = pickWindows(parseServerUsage(res.text))
   if (windows.length > 0) await adopt($, windows, undefined, true)
   await refreshStatus($, config)

@@ -30,6 +30,11 @@ function engineBeneath(on: On, own: { rateLimits: SessionRateLimit[] }, isSubscr
 
     return { value: undefined }
   })
+  on('store.delete', ($, e) => {
+    delete shared[e.key]
+
+    return { value: undefined }
+  })
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('session.usage', () => ({
@@ -121,12 +126,13 @@ describe('lettura dal server (come il popup di Claude)', () => {
     seven_day_opus: null,
   }
 
-  function server(on: On, body: unknown = SERVER, status = 200) {
+  function server(on: On, body: unknown = SERVER, status: number | (() => number) = 200, headers: Record<string, string> = {}) {
     const calls: { url: string; auth?: string; beta?: string }[] = []
     on('http.fetch', ($, e) => {
       calls.push({ url: e.url, auth: e.init?.auth, beta: e.init?.headers?.['anthropic-beta'] })
+      const code = typeof status === 'function' ? status() : status
 
-      return { value: { status, ok: status === 200, headers: {}, text: JSON.stringify(body) } }
+      return { value: { status: code, ok: code === 200, headers, text: JSON.stringify(body) } }
     })
 
     return calls
@@ -194,5 +200,39 @@ describe('lettura dal server (come il popup di Claude)', () => {
     await start($)
     await clock.advance(120_000)
     expect(calls).toHaveLength(0)
+  })
+
+  test('429: rallenta (raddoppiando la pausa) e poi riprende', BAND_ON, async ($, on) => {
+    const { clock, shared } = engineBeneath(on, { rateLimits: LIMITS }, true)
+    let code = 429
+    const calls = server(on, SERVER, () => code)
+    await start($)
+    await clock.advance(1)
+    expect(calls).toHaveLength(1)
+    // Pausa di 2 minuti: al minuto non riprova.
+    await clock.advance(60_000)
+    expect(calls).toHaveLength(1)
+    await clock.advance(60_000)
+    expect(calls).toHaveLength(2)
+    // Secondo rifiuto: la pausa diventa 4 minuti.
+    await clock.advance(3 * 60_000)
+    expect(calls).toHaveLength(2)
+    code = 200
+    await clock.advance(60_000)
+    expect(calls).toHaveLength(3)
+    expect(shared.serverBackoff).toBeUndefined()
+    await clock.advance(60_000)
+    expect(calls).toHaveLength(4)
+  })
+
+  test('429 con retry-after: aspetta quanto chiede il server', BAND_ON, async ($, on) => {
+    const { clock } = engineBeneath(on, { rateLimits: LIMITS }, true)
+    const calls = server(on, SERVER, 429, { 'retry-after': '600' })
+    await start($)
+    await clock.advance(1)
+    await clock.advance(9 * 60_000)
+    expect(calls).toHaveLength(1)
+    await clock.advance(60_000)
+    expect(calls).toHaveLength(2)
   })
 })

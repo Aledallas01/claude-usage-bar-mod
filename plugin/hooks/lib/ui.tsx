@@ -27,6 +27,30 @@ export function paceOf(view: WindowView): Pace {
   return 'even'
 }
 
+/** Margine (punti) entro cui "sotto il ritmo" è ancora da tenere d'occhio. */
+export const PACE_MARGIN = 5
+
+export type PaceColor = 'error' | 'warning' | 'success'
+
+/**
+ * Colore del ritmo: rosso se l'utilizzo supera il tempo trascorso (sei sopra
+ * dove dovresti essere), arancione se sei sotto di 0–5 punti, verde se sei
+ * sotto di più di 5 punti.
+ */
+export function paceColor(view: WindowView): PaceColor | undefined {
+  if (!view.time.ok || view.time.isResetPassed) return undefined
+  const diff = view.percentUsed - view.time.elapsedPercent
+  if (diff > 0) return 'error'
+  if (diff >= -PACE_MARGIN) return 'warning'
+
+  return 'success'
+}
+
+/** Classe SVG del tratto tra utilizzo e tempo, con lo stesso colore del ritmo. */
+function deltaClass(view: WindowView, delta: Delta): string {
+  return delta.kind === 'under' && paceColor(view) === 'warning' ? 'near' : delta.kind
+}
+
 export function usageText(view: WindowView, lang: Lang = 'it'): string {
   return dict(lang).usageReal(formatPercent(view.percentUsed))
 }
@@ -90,8 +114,8 @@ export function barSvg(view: WindowView, now: number, timeZone?: string, lang: L
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="25" viewBox="0 0 ${W} 10">`,
     '<style>',
-    '.track{fill:#e3e3e0}.usage{fill:#2b74d9}.over{fill:#d64545}.under{fill:#2f9e55}.mark{stroke:#1f1e1d}',
-    '@media (prefers-color-scheme: dark){.track{fill:#3a3a38}.usage{fill:#3b82f6}.over{fill:#ef5b5b}.under{fill:#4cc27a}.mark{stroke:#f5f4ef}}',
+    '.track{fill:#e3e3e0}.usage{fill:#2b74d9}.over{fill:#d64545}.under{fill:#2f9e55}.near{fill:#c77d12}.mark{stroke:#1f1e1d}',
+    '@media (prefers-color-scheme: dark){.track{fill:#3a3a38}.usage{fill:#3b82f6}.over{fill:#ef5b5b}.under{fill:#4cc27a}.near{fill:#e6a028}.mark{stroke:#f5f4ef}}',
     '</style>',
     `<clipPath id="r"><rect x="0" y="2" width="${W}" height="6" rx="3"/></clipPath>`,
     `<g><title>${usageTitle}</title>`,
@@ -100,7 +124,7 @@ export function barSvg(view: WindowView, now: number, timeZone?: string, lang: L
     '</g>',
     delta === undefined
       ? ''
-      : `<g><title>${deltaTitle}</title><rect class="${delta.kind}" x="${x(base)}" y="2" width="${x(
+      : `<g><title>${deltaTitle}</title><rect class="${deltaClass(view, delta)}" x="${x(base)}" y="2" width="${x(
           delta.size,
         )}" height="6" clip-path="url(#r)"/></g>`,
     hasTime
@@ -239,15 +263,16 @@ export function contextSvg(c: ContextInfo, lang: Lang = 'it'): string {
 }
 
 /** "37 pt sotto il ritmo" / "12 pt sopra il ritmo" / "in linea con il ritmo". */
-export function paceShort(view: WindowView, lang: Lang = 'it'): { text: string; color?: 'error' | 'success' } | undefined {
+export function paceShort(view: WindowView, lang: Lang = 'it'): { text: string; color?: PaceColor } | undefined {
   if (!view.time.ok || view.time.isResetPassed) return undefined
   const d = dict(lang)
   const delta = deltaOf(view)
-  if (delta === undefined) return { text: d.paceEven }
+  const color = paceColor(view)
+  if (delta === undefined) return { text: d.paceEven, color }
   const pts = Math.round(delta.size)
-  if (delta.kind === 'over') return { text: d.paceAhead(pts), color: 'error' }
+  if (delta.kind === 'over') return { text: d.paceAhead(pts), color }
 
-  return { text: d.paceBehind(pts), color: 'success' }
+  return { text: d.paceBehind(pts), color }
 }
 
 /**
@@ -320,7 +345,7 @@ export function renderBand(input: BandInput): RenderElement {
                 <Text>
                   <Text color="suggestion">{bars.usage[0]}</Text>
                   {bars.delta !== undefined && (
-                    <Text color={bars.delta === 'over' ? 'error' : 'success'}>{bars.usage[1]}</Text>
+                    <Text color={paceColor(view)}>{bars.usage[1]}</Text>
                   )}
                   <Text dimColor>{bars.usage[2]}</Text>
                 </Text>
@@ -356,14 +381,14 @@ export type ModeButtonInput = {
 
 /**
  * Il pulsante accanto all'indicatore dei limiti: "⏱ 5h 42% · 7d 23%", ogni
- * finestra colorata in rosso (sopra il ritmo) o verde (sotto). Le etichette di
+ * finestra colorata come il ritmo (paceColor: rosso sopra, arancione fino a 5
+ * punti sotto, verde oltre). Le etichette di
  * modalità del motore restano davanti, invariate.
  */
 export function renderModeButton(input: ModeButtonInput): RenderElement {
   const { Box, Text, Button } = input.elements
   const parts = input.views.map((view, i) => {
-    const delta = deltaOf(view)
-    const color = delta === undefined ? undefined : delta.kind === 'over' ? 'error' : 'success'
+    const color = paceColor(view)
     const short = view.kind === 'five_hour' ? '5h' : '7d'
 
     return (

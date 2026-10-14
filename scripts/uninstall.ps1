@@ -21,8 +21,8 @@ if ($installed -match 'usage-time-bar') {
   Write-Host 'Plugin non installato: niente da disinstallare.'
 }
 
-$known = & $cli.Path plugin marketplace list 2>$null | Out-String
-if ($known -match [regex]::Escape($MarketplaceName)) {
+[void](Remove-LegacyInstall $cli.Path)
+if (Test-Marketplace $cli.Path $MarketplaceName) {
   Invoke-Claude $cli.Path @('plugin', 'marketplace', 'remove', $MarketplaceName)
 }
 

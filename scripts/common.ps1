@@ -4,8 +4,10 @@ $ErrorActionPreference = 'Stop'
 
 $Script:ProjectRoot = Split-Path -Parent $PSScriptRoot
 $Script:PluginDir = Join-Path $ProjectRoot 'plugin'
-$Script:PluginId = 'usage-time-bar@usage-time-bar-local'
-$Script:MarketplaceName = 'usage-time-bar-local'
+$Script:PluginId = 'usage-time-bar@usage-time-bar'
+$Script:MarketplaceName = 'usage-time-bar'
+# Nome usato fino alla 0.6: le installazioni precedenti vengono migrate.
+$Script:LegacyMarketplace = 'usage-time-bar-local'
 $Script:BackupRoot = Join-Path $ProjectRoot 'backup'
 $Script:MinVersion = [version]'2.1.295'
 
@@ -49,6 +51,22 @@ function Invoke-Claude([string]$Cli, [string[]]$Arguments) {
   Write-Host "> claude $($Arguments -join ' ')" -ForegroundColor DarkGray
   & $Cli @Arguments
   if ($LASTEXITCODE -ne 0) { throw "Comando fallito (codice $LASTEXITCODE): claude $($Arguments -join ' ')" }
+}
+
+# Il nome esatto di un marketplace nell'elenco di `claude plugin marketplace
+# list` ('usage-time-bar' non deve combaciare con 'usage-time-bar-local').
+function Test-Marketplace([string]$Cli, [string]$Name) {
+  $known = & $Cli plugin marketplace list 2>$null | Out-String
+  return $known -match ('(?m)(^|[^\w-])' + [regex]::Escape($Name) + '($|[^\w-])')
+}
+
+# Toglie l'installazione con il vecchio nome del marketplace, se c'è.
+function Remove-LegacyInstall([string]$Cli) {
+  if (-not (Test-Marketplace $Cli $LegacyMarketplace)) { return $false }
+  Write-Host "Migrazione dal marketplace '$LegacyMarketplace' a '$MarketplaceName'..." -ForegroundColor Yellow
+  & $Cli plugin uninstall "usage-time-bar@$LegacyMarketplace" --scope user 2>$null | Out-Null
+  Invoke-Claude $Cli @('plugin', 'marketplace', 'remove', $LegacyMarketplace)
+  return $true
 }
 
 # Copia i file toccati in backup\<data>\ con un manifest di hash SHA-256.

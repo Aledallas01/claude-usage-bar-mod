@@ -33,6 +33,10 @@ $script:Strings = @{
     estNA = 'stima non disponibile (reset non comunicato)'; stale = 'dati non aggiornati — apri Claude Desktop'
     noData1 = 'Nessun dato dai limiti.'; noData2 = 'Apri Claude Desktop: i dati compaiono dopo la prima risposta.'
     mShow = 'Mostra i limiti'; mRefresh = 'Aggiorna'; mQuit = 'Esci'; tip = 'Claude — limiti di utilizzo'
+    mNotify = 'Notifiche'
+    nTitleThr = '{0}: {1} usato'; nBodyThr = 'Hai superato la soglia del {0}%. {1}.'
+    nTitleReset = '{0} ripristinato'; nBodyReset = 'Il limite si è azzerato: puoi tornare a usare Claude a pieno ritmo.'
+    nTitlePace = '{0}: sopra il ritmo'; nBodyPace = 'Stai consumando {0} punti più in fretta del tempo che passa.'
   }
   en = @{
     context = 'Context window'; title = 'Plan usage limits · pace'
@@ -43,6 +47,10 @@ $script:Strings = @{
     estNA = 'estimate unavailable (reset not reported)'; stale = 'data not updated — open Claude Desktop'
     noData1 = 'No usage data.'; noData2 = "Open Claude Desktop: data appears after Claude's first reply."
     mShow = 'Show limits'; mRefresh = 'Refresh'; mQuit = 'Quit'; tip = 'Claude — usage limits'
+    mNotify = 'Notifications'
+    nTitleThr = '{0}: {1} used'; nBodyThr = 'You passed the {0}% threshold. {1}.'
+    nTitleReset = '{0} reset'; nBodyReset = 'The limit has reset: you can use Claude at full pace again.'
+    nTitlePace = '{0}: ahead of pace'; nBodyPace = 'You are using it {0} points faster than time is passing.'
   }
 }
 $script:T = $script:Strings[$script:Lang]
@@ -320,6 +328,87 @@ function Toggle-Popup {
   }
 }
 
+# --- Notifiche di Windows: soglie, ritmo e reset, una volta per finestra ---
+# Impostazioni (menu del clic destro) e avvisi già inviati, in
+# %APPDATA%\ClaudeLimitsTray\settings.json.
+$script:SettingsDir = Join-Path $env:APPDATA 'ClaudeLimitsTray'
+$script:SettingsFile = Join-Path $script:SettingsDir 'settings.json'
+$script:Settings = [pscustomobject]@{ notifications = $true; thresholds = @(75, 90); paceAlertPts = 15; notified = @() }
+
+function Load-Settings {
+  try {
+    if (Test-Path $script:SettingsFile) {
+      $s = [System.IO.File]::ReadAllText($script:SettingsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+      foreach ($name in 'notifications', 'thresholds', 'paceAlertPts', 'notified') {
+        if ($null -ne $s.$name) { $script:Settings.$name = $s.$name }
+      }
+    }
+  } catch { }
+  $script:Settings.notified = @($script:Settings.notified)
+}
+
+function Save-Settings {
+  try {
+    New-Item -ItemType Directory -Force $script:SettingsDir | Out-Null
+    # Bastano gli ultimi avvisi: servono solo a non ripetere quelli della finestra in corso.
+    $script:Settings.notified = @($script:Settings.notified | Select-Object -Last 60)
+    [System.IO.File]::WriteAllText($script:SettingsFile, ($script:Settings | ConvertTo-Json -Depth 4), [System.Text.Encoding]::UTF8)
+  } catch { }
+}
+
+function Get-WindowName($w) {
+  if ($w.Kind -eq 'five_hour') { return $script:T.five }
+  if ($w.Kind -eq 'seven_day') { return $script:T.seven }
+  if ($w.Label) { return $w.Label }
+  return $w.Kind
+}
+
+function Send-Notice([string]$key, [string]$title, [string]$body) {
+  if ($script:Settings.notified -contains $key) { return }
+  $script:Settings.notified = @($script:Settings.notified) + $key
+  Save-Settings
+  if (-not $script:Settings.notifications) { return }
+  $notify.ShowBalloonTip(8000, $title, $body, [System.Windows.Forms.ToolTipIcon]::Info)
+}
+
+function Check-Notifications {
+  $data = $script:Data
+  if ($null -eq $data) { return }
+  $t = $script:T
+  $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+  foreach ($w in $data.Windows) {
+    $name = Get-WindowName $w
+    $id = "$($w.Kind)|$($w.ResetMs)"
+    if ($w.ResetPassed) {
+      # Reset avvenuto da poco (niente avvisi vecchi all'avvio del programma).
+      if ($null -ne $w.ResetMs -and ($now - $w.ResetMs) -lt 6 * 3600000) {
+        Send-Notice "reset|$id" ([string]::Format($t.nTitleReset, $name)) $t.nBodyReset
+      }
+      continue
+    }
+    if ($data.IsStale) { continue }
+    # Solo la soglia più alta superata: niente raffica di avvisi all'avvio.
+    $passed = @($script:Settings.thresholds | Where-Object { $w.Percent -ge $_ } | Sort-Object)
+    if ($passed.Count -gt 0) {
+      $thr = $passed[-1]
+      foreach ($lower in $passed) {
+        $k = "thr|$id|$lower"
+        if ($lower -ne $thr -and $script:Settings.notified -notcontains $k) { $script:Settings.notified = @($script:Settings.notified) + $k }
+      }
+      Send-Notice "thr|$id|$thr" ([string]::Format($t.nTitleThr, $name, (Format-Percent $w.Percent))) ([string]::Format($t.nBodyThr, $thr, (Reset-Text $w)))
+    }
+    # Il ritmo è un preavviso: superata una soglia non serve più.
+    if ($passed.Count -eq 0 -and $null -ne $w.Elapsed -and $script:Settings.paceAlertPts -gt 0) {
+      $diff = [math]::Round($w.Percent - $w.Elapsed)
+      if ($diff -ge $script:Settings.paceAlertPts) {
+        Send-Notice "pace|$id" ([string]::Format($t.nTitlePace, $name)) ([string]::Format($t.nBodyPace, $diff))
+      }
+    }
+  }
+}
+
+Load-Settings
+
 # --- Icona nell'area di notifica ---
 if (-not (Test-Path $IconPath)) {
   & (Join-Path $PSScriptRoot 'make-icon.ps1')
@@ -338,6 +427,12 @@ $miOpen = $menu.Items.Add($script:T.mShow)
 $miOpen.add_Click({ Show-Popup })
 $miRefresh = $menu.Items.Add($script:T.mRefresh)
 $miRefresh.add_Click({ if ($null -ne $script:Form -and $script:Form.Visible) { Show-Popup } })
+[void]$menu.Items.Add('-')
+$miNotify = New-Object System.Windows.Forms.ToolStripMenuItem $script:T.mNotify
+$miNotify.CheckOnClick = $true
+$miNotify.Checked = [bool]$script:Settings.notifications
+$miNotify.add_Click({ $script:Settings.notifications = $miNotify.Checked; Save-Settings })
+[void]$menu.Items.Add($miNotify)
 [void]$menu.Items.Add('-')
 $miExit = $menu.Items.Add($script:T.mQuit)
 $miExit.add_Click({
@@ -443,6 +538,9 @@ function Refresh-Live([bool]$force) {
   Update-Tooltip
   try { Update-TrayIcon } catch {
     ("[{0}] ICON: {1}" -f (Get-Date), $_.Exception.Message) | Out-File -Append -Encoding utf8 $script:LogFile
+  }
+  try { Check-Notifications } catch {
+    ("[{0}] NOTIFY: {1}" -f (Get-Date), $_.Exception.Message) | Out-File -Append -Encoding utf8 $script:LogFile
   }
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
     $h = if ($null -ne $script:Data) { Measure-PopupHeight $script:Data } else { 70 }

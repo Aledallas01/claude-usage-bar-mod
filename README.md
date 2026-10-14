@@ -21,8 +21,9 @@ Così si vede subito se si consuma più in fretta del tempo che passa.
 ## Cosa mostra
 
 Nel piede del prompt della scheda Code, accanto all'indicatore dei limiti di
-Claude, compare il pulsante **⏱ 5h 42% · 7d 23%**: ogni finestra è verde se sei
-sotto il ritmo, rossa se sei sopra. Premendolo si apre un riquadro (pane) sopra
+Claude, compare il pulsante **⏱ 5h 42% · 7d 23%**: ogni finestra è **rossa** se
+sei sopra il ritmo (anche di poco), **arancione** se sei sotto di 0–5 punti,
+**verde** se sei sotto di più di 5 punti. Premendolo si apre un riquadro (pane) sopra
 il prompt, costruito come il popup dei limiti di Claude: "Finestra di contesto ·
 307.6k / 1M (31%)" con la sua barra, poi "Limiti di utilizzo del piano" con nome
 a sinistra, "Si ripristina tra…/Si azzera…" e percentuale a destra, barra sottile
@@ -38,7 +39,8 @@ Per ciascuna finestra (Limite di 5 ore, Settimanale):
 
 * **barra piena arancione**: utilizzo reale comunicato da Claude, invariato;
 * **tratto rosso**: la parte di utilizzo che supera il tempo trascorso (sei sopra il ritmo);
-* **tratto verde**: il margine tra utilizzo reale e tempo trascorso (sei sotto il ritmo);
+* **tratto verde**: il margine tra utilizzo reale e tempo trascorso (sei sotto il ritmo
+  di più di 5 punti; **arancione** se il margine è di 5 punti o meno);
   la lunghezza totale arancione+rosso è sempre l'utilizzo reale;
 * **linea sottile blu + tacca verticale**: tempo trascorso nella finestra
   (stima calcolata dalla mod, *non* è consumo e non è un dato ufficiale);
@@ -73,7 +75,10 @@ I testi (mod e app) si adattano **automaticamente** alla lingua di Windows: ital
 
 Oltre alla mod, in [tray/](tray/) c'è un **programma Windows** che mette
 un'icona nell'area di notifica (vicino all'orologio): al clic apre lo stesso
-popup dei limiti, con clic-fuori/Esc per chiudere. Legge i dati che la mod salva
+popup dei limiti, con clic-fuori/Esc per chiudere. L'icona cambia colore
+secondo il ritmo del limite di 5 ore e il programma manda **notifiche di Windows**
+alle soglie del 75% e 90%, quando vai troppo sopra il ritmo e quando un limite si
+azzera. Legge i dati che la mod salva
 in `~\.claude\plugins\store\usage-time-bar_*.json` (nessuna rete, nessuna
 credenziale). Installazione: `powershell -ExecutionPolicy Bypass -File
 tray\install-tray.ps1`. Dettagli in
@@ -88,6 +93,26 @@ tray\install-tray.ps1`. Dettagli in
 
 ## Installazione
 
+### Rapida, da GitHub (un terminale con Claude Code)
+
+Nel prompt di una sessione di Claude Code **da terminale** (`claude`):
+
+```
+/plugin install usage-time-bar --marketplace Aledallas01/claude-usage-bar-mod
+```
+
+Rispondi `y` per aggiungere il marketplace, scegli l'ambito **utente** e il
+plugin è subito attivo, senza riavvii. In ambito utente vale anche per la scheda
+Code di Claude Desktop (nuove sessioni, o `/reload-plugins`). Gli aggiornamenti
+arrivano con `/plugin` › marketplace `usage-time-bar` › aggiorna, oppure
+`claude plugin update usage-time-bar@usage-time-bar`.
+
+> Nella scheda Code di Claude Desktop il comando `/plugin` non è disponibile:
+> lì usa l'installazione dalla cartella qui sotto. L'icona nella barra di Windows
+> (`tray\`) richiede comunque la cartella del progetto.
+
+### Dalla cartella del progetto (Windows, con script)
+
 Da PowerShell, nella cartella del progetto:
 
 ```bash
@@ -96,28 +121,28 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1
 
 Lo script:
 
-1. esegue i 39 test automatici e la validazione ufficiale (`claude plugin test/validate`);
+1. esegue i test automatici e la validazione ufficiale (`claude plugin test/validate`);
 2. salva in `backup\<data-ora>\` una copia di `~\.claude\settings.json`,
    `~\.claude\plugins\installed_plugins.json` e `known_marketplaces.json`, con
    hash SHA-256 verificati (`manifest.json`);
-3. registra questa cartella come marketplace locale `usage-time-bar-local`;
+3. registra questa cartella come marketplace `usage-time-bar` (se trova il vecchio
+   nome `usage-time-bar-local` delle versioni fino alla 0.6, lo migra);
 4. installa il plugin `usage-time-bar` in ambito utente.
 
 Poi apri una **nuova sessione** nella scheda Code (o esegui `/reload-plugins`). Le
-barre compaiono sopra il prompt dopo la prima risposta di Claude (prima il motore
-non ha ancora ricevuto i limiti; l'ultimo dato salvato viene comunque mostrato).
+barre compaiono subito con i dati del server, o dopo la prima risposta di Claude.
 
-**Dopo una modifica al codice**: le sessioni caricano all'avvio una copia in
-`~\.claude\plugins\cache\usage-time-bar-local\usage-time-bar\<versione>\`, non la
-cartella. Alza `version` in `plugin\.claude-plugin\plugin.json` ed esegui
+**Dopo una modifica al codice**: con il marketplace sulla cartella, le sessioni
+leggono il plugin dalla cartella stessa, quindi basta `/reload-plugins`. Per
+registrare una nuova versione alza `version` in `plugin\.claude-plugin\plugin.json`
+ed esegui
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 ```
 
-che aggiorna la copia e verifica che coincida con la cartella. Le sessioni già
-aperte continuano con la vecchia versione finché non digiti `/reload-plugins` o
-ne apri una nuova.
+che aggiorna la copia in `~\.claude\plugins\cache\usage-time-bar\usage-time-bar\<versione>\`
+e verifica che coincida con la cartella.
 
 ## Disinstallazione e ripristino
 
@@ -162,7 +187,7 @@ ClaudeUsageBarMod/
 │  ├─ hooks/lib/ui.tsx               barre SVG (desktop) e a caratteri (terminale)
 │  ├─ hooks/lib/config.ts            lettura opzioni
 │  ├─ types/index.d.ts               contratto dello stato ($.state)
-│  └─ tests/*.test.ts(x)             39 test automatici
+│  └─ tests/*.test.ts(x)             test automatici (claude plugin test)
 ├─ scripts/install.ps1 · uninstall.ps1 · check.ps1 · common.ps1
 └─ docs/ANALISI.md                   analisi dell'installazione reale
 ```

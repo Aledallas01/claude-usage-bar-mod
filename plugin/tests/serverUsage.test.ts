@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { mergeWindows, parseServerUsage } from '../hooks/lib/serverUsage'
+import { mergeWindows, parseServerUsage, retryAfterMs } from '../hooks/lib/serverUsage'
 import { pickWindows } from '../hooks/lib/windows'
 
 describe('risposta del server', () => {
@@ -42,5 +42,15 @@ describe('unione delle letture', () => {
   test('aggiunge le finestre mancanti nell\'ordine dell\'app', () => {
     const week = pickWindows([{ kind: 'seven_day', percentUsed: 31 }])
     expect(mergeWindows(week, a).map(w => w.kind)).toEqual(['five_hour', 'seven_day'])
+  })
+})
+
+describe('retry-after', () => {
+  const NOW = Date.parse('2026-10-11T14:00:00Z')
+  test('secondi, data HTTP, assente o non valido', () => {
+    expect(retryAfterMs('120', NOW)).toBe(120_000)
+    expect(retryAfterMs('Sun, 11 Oct 2026 14:05:00 GMT', NOW)).toBe(300_000)
+    expect(retryAfterMs(undefined, NOW)).toBeUndefined()
+    expect(retryAfterMs('presto', NOW)).toBeUndefined()
   })
 })

@@ -77,3 +77,13 @@ export function mergeWindows(base: readonly UsageWindow[], incoming: readonly Us
     return w ? [w] : []
   })
 }
+
+/** `retry-after` in secondi o come data HTTP; undefined se assente o non valido. */
+export function retryAfterMs(header: string | undefined, now: number): number | undefined {
+  if (header === undefined) return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000
+  const at = Date.parse(header)
+
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined
+}
