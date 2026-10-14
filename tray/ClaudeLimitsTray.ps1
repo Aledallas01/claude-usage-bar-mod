@@ -68,6 +68,16 @@ $ColTrack = [System.Drawing.Color]::FromArgb(58, 58, 56)
 $ColBlue = [System.Drawing.Color]::FromArgb(59, 130, 246)
 $ColGreen = [System.Drawing.Color]::FromArgb(76, 194, 122)
 $ColRed = [System.Drawing.Color]::FromArgb(239, 91, 91)
+$ColAmber = [System.Drawing.Color]::FromArgb(230, 160, 40)
+
+# Colore del ritmo, stessa regola dell'icona: rosso sopra il ritmo, arancione
+# da 0 a 5 punti sotto, verde oltre 5 punti sotto.
+function Get-PaceColor($w) {
+  $diff = $w.Percent - $w.Elapsed
+  if ($diff -gt 0) { return $ColRed }
+  if ($diff -ge -5) { return $ColAmber }
+  return $ColGreen
+}
 
 # --- Formattazione (stessa logica della mod) ---
 function Format-Tokens([double]$n) {
@@ -222,7 +232,7 @@ function Draw-Bar([System.Drawing.Graphics]$g, [int]$x, [int]$y, [int]$w, $win) 
     $blue = New-Object System.Drawing.SolidBrush $ColBlue
     $g.FillRectangle($blue, $x, $y, $basePx, 6)
     if ([math]::Abs($diff) -ge 0.5) {
-      $segBrush = New-Object System.Drawing.SolidBrush ($(if ($diff -gt 0) { $ColRed } else { $ColGreen }))
+      $segBrush = New-Object System.Drawing.SolidBrush (Get-PaceColor $win)
       $g.FillRectangle($segBrush, ($x + $basePx), $y, ($hiPx - $basePx), 6)
       $segBrush.Dispose()
     }
@@ -312,13 +322,15 @@ function On-PaintCore {
     $y += 14
     if ($null -ne $win.Elapsed -and -not $win.ResetPassed) {
       $diff = [math]::Round($win.Percent - $win.Elapsed)
+      $bPace = New-Object System.Drawing.SolidBrush (Get-PaceColor $win)
       if ([math]::Abs($diff) -lt 1) {
-        $g.DrawString($t.even, $fSmall, $bDim, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString($t.even, $fSmall, $bPace, [single]($cw - $pad), [single]$y, $sfRight)
       } elseif ($diff -gt 0) {
-        $g.DrawString([string]::Format($t.ahead, $diff), $fSmall, $bRed, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString([string]::Format($t.ahead, $diff), $fSmall, $bPace, [single]($cw - $pad), [single]$y, $sfRight)
       } else {
-        $g.DrawString([string]::Format($t.behind, [math]::Abs($diff)), $fSmall, $bGreen, [single]($cw - $pad), [single]$y, $sfRight)
+        $g.DrawString([string]::Format($t.behind, [math]::Abs($diff)), $fSmall, $bPace, [single]($cw - $pad), [single]$y, $sfRight)
       }
+      $bPace.Dispose()
     } elseif ($null -eq $win.ResetMs) {
       $g.DrawString($t.estNA, $fSmall, $bDim, $pad, $y)
     } elseif ($data.IsStale) {
