@@ -3,10 +3,60 @@
 
 import type { Elements, RenderElement } from 'claude-code'
 
-import { dict } from './i18n'
+import { dict, LOCALES } from './i18n'
 import type { Lang } from './i18n'
-import { formatDuration, formatPercent, formatResetTime } from './timeWindow'
+import type { Credit } from './serverUsage'
+import { formatDuration, formatPercent, formatResetTime, toEpochMs } from './timeWindow'
 import type { WindowView } from './windows'
+
+/** Nome della finestra come nel popup di Claude ("Settimanale · Fable"). */
+export function windowName(view: WindowView, lang: Lang = 'it'): string {
+  const d = dict(lang)
+
+  return view.name === undefined ? d.windowLabel[view.kind] : d.scopedLabel[view.kind](view.name)
+}
+
+/** Etichetta corta per pulsante e riga di stato: "5h", "7d", "Fable". */
+export function shortName(view: WindowView): string {
+  if (view.name !== undefined) return view.name
+
+  return view.kind === 'five_hour' ? '5h' : '7d'
+}
+
+/** Chiave stabile di una finestra nella scheda. */
+function windowKey(view: WindowView): string {
+  return view.name === undefined ? `win-${view.kind}` : `win-${view.kind}-${view.name}`
+}
+
+/** "250 USD", "12,50 USD". */
+export function formatMoney(amount: number, currency: string, lang: Lang = 'it'): string {
+  const n = new Intl.NumberFormat(LOCALES[lang], {
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
+
+  return `${n} ${currency}`
+}
+
+/** "250 USD di 250 USD rimanenti", come nel popup di Claude. */
+export function creditRemainingText(c: Credit, lang: Lang = 'it'): string {
+  return dict(lang).creditsRemaining(formatMoney(c.remaining, c.currency, lang), formatMoney(c.limit, c.currency, lang))
+}
+
+/** "Scade 5 nov 08:59" (data e ora locali). */
+export function creditExpiryText(c: Credit, now: number, timeZone?: string, lang: Lang = 'it'): string | undefined {
+  const at = toEpochMs(c.expiresAt)
+  if (at === undefined) return undefined
+
+  return dict(lang).creditsExpires(formatResetTime(at, now, timeZone, lang))
+}
+
+/** Frase completa dei crediti per il comando e i lettori di schermo. */
+export function creditSummary(c: Credit, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  const expiry = creditExpiryText(c, now, timeZone, lang)
+
+  return `${dict(lang).creditsTitle}: ${creditRemainingText(c, lang)}${expiry === undefined ? '' : ` · ${expiry}`}.`
+}
 
 /** Scarto (punti percentuali) oltre il quale il ritmo è segnalato. */
 const PACE_TOLERANCE = 5
@@ -81,7 +131,7 @@ export function paceText(pace: Pace, view: WindowView, lang: Lang = 'it'): strin
 export function accessibleSummary(view: WindowView, now: number, timeZone?: string, lang: Lang = 'it'): string {
   const d = dict(lang)
   const pace = paceText(paceOf(view), view, lang)
-  const label = d.windowLabel[view.kind]
+  const label = windowName(view, lang)
 
   return `${label}: ${usageText(view, lang)} (${d.official}). ${timeText(view, now, timeZone, lang)}${
     view.time.ok && !view.time.isResetPassed ? ` (${d.theoretical})` : ''
@@ -210,6 +260,8 @@ export type BandInput = {
   lang: Lang
   views: readonly WindowView[]
   context?: ContextInfo
+  /** Crediti a importo ("Crediti per sessioni cloud"), se il server li comunica. */
+  credits?: readonly Credit[]
   now: number
   observedAt: number
   bodyColumns: number
@@ -242,6 +294,22 @@ export function contextText(c: ContextInfo): string {
   const used = c.tokens === undefined ? '–' : formatTokens(c.tokens)
 
   return `${used} / ${formatTokens(c.window)}${pct === undefined ? '' : ` (${pct}%)`}`
+}
+
+/** Barra dei crediti usati, nello stile delle altre (vuota se nulla è usato). */
+export function creditSvg(usedPercent: number): string {
+  const W = 400
+  const w = ((Math.min(100, Math.max(0, usedPercent)) / 100) * W).toFixed(2)
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="25" viewBox="0 0 ${W} 10">`,
+    '<style>.track{fill:#e3e3e0}.usage{fill:#2b74d9}',
+    '@media (prefers-color-scheme: dark){.track{fill:#3a3a38}.usage{fill:#3b82f6}}</style>',
+    `<clipPath id="r"><rect x="0" y="2" width="${W}" height="6" rx="3"/></clipPath>`,
+    `<rect class="track" x="0" y="2" width="${W}" height="6" rx="3"/>`,
+    `<rect class="usage" x="0" y="2" width="${w}" height="6" clip-path="url(#r)"/>`,
+    '</svg>',
+  ].join('')
 }
 
 /** Barra semplice della finestra di contesto, nello stile delle altre. */
@@ -331,9 +399,9 @@ export function renderBand(input: BandInput): RenderElement {
           const bars = textBars(view, barCells)
 
           return (
-            <Box key={`win-${view.kind}`} flexDirection="column" marginTop={1}>
+            <Box key={windowKey(view)} flexDirection="column" marginTop={1}>
               <Box justifyContent="space-between">
-                <Text bold>{d.windowLabel[view.kind]}</Text>
+                <Text bold>{windowName(view, lang)}</Text>
                 <Text>
                   <Text dimColor>{resetText(view, now, timeZone, lang)}{'  '}</Text>
                   <Text>{formatPercent(view.percentUsed)}</Text>
@@ -357,6 +425,29 @@ export function renderBand(input: BandInput): RenderElement {
             </Box>
           )
         })}
+      {(input.credits ?? []).map(credit => {
+        const usedPct = credit.limit > 0 ? (credit.used / credit.limit) * 100 : 0
+        const cells = Math.round((Math.min(100, Math.max(0, usedPct)) / 100) * barCells)
+        const expiry = creditExpiryText(credit, now, timeZone, lang)
+
+        return (
+          <Box key={`credit-${credit.id}`} flexDirection="column" marginTop={1}>
+            <Box justifyContent="space-between">
+              <Text bold>{d.creditsTitle}</Text>
+              <Text dimColor>{creditRemainingText(credit, lang)}</Text>
+            </Box>
+            {Svg !== undefined ? (
+              <Svg source={creditSvg(usedPct)} alt={creditSummary(credit, now, timeZone, lang)} />
+            ) : (
+              <Text>
+                <Text color="suggestion">{'█'.repeat(cells)}</Text>
+                <Text dimColor>{'░'.repeat(barCells - cells)}</Text>
+              </Text>
+            )}
+            {expiry !== undefined && <Text dimColor>{expiry}</Text>}
+          </Box>
+        )
+      })}
     </Box>
   )
 
@@ -389,7 +480,7 @@ export function renderModeButton(input: ModeButtonInput): RenderElement {
   const { Box, Text, Button } = input.elements
   const parts = input.views.map((view, i) => {
     const color = paceColor(view)
-    const short = view.kind === 'five_hour' ? '5h' : '7d'
+    const short = shortName(view)
 
     return (
       <Text color={color}>
@@ -455,7 +546,7 @@ export function renderEmptyCard(
 export function statusText(views: readonly WindowView[]): string {
   return views
     .map(view => {
-      const short = view.kind === 'five_hour' ? '5h' : '7d'
+      const short = shortName(view)
       const time = view.time.ok && !view.time.isResetPassed ? ` ⏱${Math.round(view.time.elapsedPercent)}%` : ' ⏱–'
 
       return `${short} ${formatPercent(view.percentUsed)}${time}`

@@ -21,7 +21,7 @@ Così si vede subito se si consuma più in fretta del tempo che passa.
 ## Cosa mostra
 
 Nel piede del prompt della scheda Code, accanto all'indicatore dei limiti di
-Claude, compare il pulsante **⏱ 5h 42% · 7d 23%**: ogni finestra è **rossa** se
+Claude, compare il pulsante **⏱ 5h 42% · 7d 23% · Fable 91%**: ogni finestra è **rossa** se
 sei sopra il ritmo (anche di poco), **arancione** se sei sotto di 0–5 punti,
 **verde** se sei sotto di più di 5 punti. Premendolo si apre un riquadro (pane) sopra
 il prompt, costruito come il popup dei limiti di Claude: "Finestra di contesto ·
@@ -32,8 +32,12 @@ dettaglio nella conversazione).
 
 Il riquadro si chiude in tre modi, come un vero popup: **clic fuori** (il focus
 lo lascia), **Esc**, o la **✕** in alto a destra (oltre a ripremere il pulsante).
-È una scheda della mod: il popup originale non è modificabile, e mancano le righe
-che alle mod non arrivano (limite per singolo modello, crediti cloud).
+È una scheda della mod: il popup originale non è modificabile. Come nel popup di
+Claude, sotto 5 ore e settimanale compaiono anche i **limiti di un singolo
+modello** (es. "Settimanale · Fable", con il suo ritmo) e i **crediti per sessioni
+cloud** ("250 USD di 250 USD rimanenti", con la scadenza). Questi due arrivano
+solo dalla lettura dal server (`serverRefreshSeconds`); se il server non li
+comunica, le righe non compaiono.
 
 Per ciascuna finestra (Limite di 5 ore, Settimanale):
 

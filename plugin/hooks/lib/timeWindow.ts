@@ -159,7 +159,9 @@ export function formatDuration(ms: number, lang: Lang = 'it'): string {
  * settimana, altrimenti "12 ott 18:30" (nella lingua scelta, 24 ore).
  * `timeZone` serve ai test.
  */
-export function formatResetTime(resetAt: number, now: number, timeZone?: string, lang: Lang = 'it'): string {
+export function formatResetTime(at: number, now: number, timeZone?: string, lang: Lang = 'it'): string {
+  // Al minuto più vicino, come il popup di Claude (09:59:59.7 → 10:00).
+  const resetAt = Math.round(at / 60_000) * 60_000
   const loc = LOCALES[lang]
   const time = new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone }).format(resetAt)
   const dayKey = (ms: number) =>

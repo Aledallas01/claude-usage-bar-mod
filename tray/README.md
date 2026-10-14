@@ -2,8 +2,9 @@
 
 Programma Windows separato (non la mod): mette un'icona nell'area di notifica
 (vicino all'orologio) e, al clic, apre un popup con i limiti di utilizzo nello
-stesso stile della scheda della mod — Finestra di contesto, Limite di sessione e
-Settimanale, con tempo trascorso e ritmo verde/rosso.
+stesso stile della scheda della mod — Finestra di contesto, Limite di sessione,
+Settimanale, i limiti di un singolo modello (es. "Settimanale · Fable") con tempo
+trascorso e ritmo, e i crediti per sessioni cloud con la scadenza.
 
 ## Da dove prende i dati
 

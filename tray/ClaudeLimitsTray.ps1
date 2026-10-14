@@ -34,6 +34,8 @@ $script:Strings = @{
     noData1 = 'Nessun dato dai limiti.'; noData2 = 'Apri Claude Desktop: i dati compaiono dopo la prima risposta.'
     mShow = 'Mostra i limiti'; mRefresh = 'Aggiorna'; mQuit = 'Esci'; tip = 'Claude — limiti di utilizzo'
     mNotify = 'Notifiche'
+    scopedWeekly = 'Settimanale · {0}'; scopedSession = 'Sessione · {0}'
+    credits = 'Crediti per sessioni cloud'; creditsLeft = '{0} di {1} rimanenti'; creditsExp = 'Scade {0}'
     nTitleThr = '{0}: {1} usato'; nBodyThr = 'Hai superato la soglia del {0}%. {1}.'
     nTitleReset = '{0} ripristinato'; nBodyReset = 'Il limite si è azzerato: puoi tornare a usare Claude a pieno ritmo.'
     nTitlePace = '{0}: sopra il ritmo'; nBodyPace = 'Stai consumando {0} punti più in fretta del tempo che passa.'
@@ -48,6 +50,8 @@ $script:Strings = @{
     noData1 = 'No usage data.'; noData2 = "Open Claude Desktop: data appears after Claude's first reply."
     mShow = 'Show limits'; mRefresh = 'Refresh'; mQuit = 'Quit'; tip = 'Claude — usage limits'
     mNotify = 'Notifications'
+    scopedWeekly = 'Weekly · {0}'; scopedSession = 'Session · {0}'
+    credits = 'Cloud session credits'; creditsLeft = '{0} of {1} remaining'; creditsExp = 'Expires {0}'
     nTitleThr = '{0}: {1} used'; nBodyThr = 'You passed the {0}% threshold. {1}.'
     nTitleReset = '{0} reset'; nBodyReset = 'The limit has reset: you can use Claude at full pace again.'
     nTitlePace = '{0}: ahead of pace'; nBodyPace = 'You are using it {0} points faster than time is passing.'
@@ -106,7 +110,9 @@ function Get-LimitsData {
 
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   $windows = @()
-  foreach ($w in $last.windows) {
+  # 5 ore e settimanale, poi i limiti di un singolo modello ("Settimanale · Fable").
+  $all = @($last.windows) + @($last.scoped | Where-Object { $null -ne $_ -and $_.name })
+  foreach ($w in $all) {
     if ($w.kind -ne 'five_hour' -and $w.kind -ne 'seven_day') { continue }
     $dur = if ($w.kind -eq 'five_hour') { $FiveHourMs } else { $SevenDayMs }
     $resetMs = $null
@@ -123,6 +129,7 @@ function Get-LimitsData {
     $windows += [pscustomobject]@{
       Kind      = $w.kind
       Label     = [string]$w.label
+      Name      = if ($w.name) { [string]$w.name } else { $null }
       Percent   = [double]$w.percentUsed
       ResetMs   = $resetMs
       Elapsed   = $elapsed
@@ -141,12 +148,40 @@ function Get-LimitsData {
     }
   }
 
+  # Crediti a importo ("Crediti per sessioni cloud"), letti dal server dalla mod.
+  $credits = @()
+  foreach ($c in @($last.credits)) {
+    if ($null -eq $c -or $null -eq $c.limit -or $null -eq $c.remaining) { continue }
+    $expMs = $null
+    if ($c.expiresAt) { try { $expMs = [DateTimeOffset]::Parse($c.expiresAt, [System.Globalization.CultureInfo]::InvariantCulture).ToUnixTimeMilliseconds() } catch { $expMs = $null } }
+    $credits += [pscustomobject]@{
+      Limit     = [double]$c.limit
+      Used      = if ($null -ne $c.used) { [double]$c.used } else { [math]::Max(0, [double]$c.limit - [double]$c.remaining) }
+      Remaining = [double]$c.remaining
+      Currency  = if ($c.currency) { [string]$c.currency } else { 'USD' }
+      ExpiresMs = $expMs
+    }
+  }
+
   return [pscustomobject]@{
     Windows   = $windows
+    Credits   = $credits
     Context   = $ctx
     UpdatedMs = [DateTimeOffset]::new($file.LastWriteTimeUtc, [TimeSpan]::Zero).ToUnixTimeMilliseconds()
     IsStale   = ($now - [DateTimeOffset]::new($file.LastWriteTimeUtc, [TimeSpan]::Zero).ToUnixTimeMilliseconds()) -gt $StaleMs
   }
+}
+
+function Format-Money([double]$amount, [string]$currency) {
+  $fmt = if ($amount -eq [math]::Floor($amount)) { '{0:0}' } else { '{0:0.00}' }
+  return ([string]::Format($script:Culture, $fmt, $amount)) + ' ' + $currency
+}
+
+function Get-WindowTitle($w) {
+  $t = $script:T
+  if ($w.Name) { return [string]::Format($(if ($w.Kind -eq 'five_hour') { $t.scopedSession } else { $t.scopedWeekly }), $w.Name) }
+  if ($w.Kind -eq 'five_hour') { return $t.five }
+  return $t.seven
 }
 
 function Reset-Text($w) {
@@ -154,7 +189,8 @@ function Reset-Text($w) {
   if ($null -eq $w.ResetMs) { return $t.resetNA }
   if ($w.ResetPassed) { return $t.already }
   if ($w.Kind -eq 'five_hour') { return [string]::Format($t.resetsIn, (Format-Duration $w.Remaining)) }
-  $local = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$w.ResetMs).LocalDateTime
+  # Al minuto più vicino, come il popup di Claude (11:59:59.7 -> 12:00).
+  $local = [DateTimeOffset]::FromUnixTimeMilliseconds([long]([math]::Round($w.ResetMs / 60000.0) * 60000)).LocalDateTime
   $day = $local.ToString('ddd', $script:Culture)
   return [string]::Format($t.resetsAt, ($day + ' ' + $local.ToString('HH:mm')))
 }
@@ -168,6 +204,7 @@ function Measure-PopupHeight($data) {
   if ($null -ne $data.Context) { $h += 44 }
   $h += 22  # titolo "Limiti di utilizzo del piano"
   $h += $data.Windows.Count * 54
+  $h += @($data.Credits).Count * 58
   $h += 8   # margine inferiore
   return $h
 }
@@ -266,7 +303,7 @@ function On-PaintCore {
   $y += 20
 
   foreach ($win in $data.Windows) {
-    $label = if ($win.Kind -eq 'five_hour') { $t.five } else { $t.seven }
+    $label = Get-WindowTitle $win
     $g.DrawString($label, $fName, $bText, $pad, $y)
     $right = (Reset-Text $win) + '   ' + (Format-Percent $win.Percent)
     $g.DrawString($right, $fVal, $bText, [single]($cw - $pad), [single]$y, $sfRight)
@@ -288,6 +325,25 @@ function On-PaintCore {
       $g.DrawString($t.stale, $fSmall, $bDim, $pad, $y)
     }
     $y += 18
+  }
+
+  foreach ($c in @($data.Credits)) {
+    $g.DrawString($t.credits, $fName, $bText, $pad, $y)
+    $left = [string]::Format($t.creditsLeft, (Format-Money $c.Remaining $c.Currency), (Format-Money $c.Limit $c.Currency))
+    $g.DrawString($left, $fVal, $bDim, [single]($cw - $pad), [single]$y, $sfRight)
+    $y += 22
+    $track = New-Object System.Drawing.SolidBrush $ColTrack
+    $blue = New-Object System.Drawing.SolidBrush $ColBlue
+    $g.FillRectangle($track, $pad, $y, $barW, 6)
+    $usedFrac = if ($c.Limit -gt 0) { Clamp01 ($c.Used / $c.Limit) } else { 0 }
+    $g.FillRectangle($blue, $pad, $y, [int]([math]::Round($usedFrac * $barW)), 6)
+    $track.Dispose(); $blue.Dispose()
+    $y += 14
+    if ($null -ne $c.ExpiresMs) {
+      $local = [DateTimeOffset]::FromUnixTimeMilliseconds([long]([math]::Round($c.ExpiresMs / 60000.0) * 60000)).LocalDateTime
+      $g.DrawString([string]::Format($t.creditsExp, $local.ToString('d MMM HH:mm', $script:Culture)), $fSmall, $bDim, $pad, $y)
+    }
+    $y += 22
   }
 
   $borderPen = New-Object System.Drawing.Pen $ColBorder
@@ -357,10 +413,7 @@ function Save-Settings {
 }
 
 function Get-WindowName($w) {
-  if ($w.Kind -eq 'five_hour') { return $script:T.five }
-  if ($w.Kind -eq 'seven_day') { return $script:T.seven }
-  if ($w.Label) { return $w.Label }
-  return $w.Kind
+  return Get-WindowTitle $w
 }
 
 function Send-Notice([string]$key, [string]$title, [string]$body) {
@@ -378,7 +431,7 @@ function Check-Notifications {
   $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   foreach ($w in $data.Windows) {
     $name = Get-WindowName $w
-    $id = "$($w.Kind)|$($w.ResetMs)"
+    $id = "$($w.Kind)|$($w.Name)|$($w.ResetMs)"
     if ($w.ResetPassed) {
       # Reset avvenuto da poco (niente avvisi vecchi all'avvio del programma).
       if ($null -ne $w.ResetMs -and ($now - $w.ResetMs) -lt 6 * 3600000) {
@@ -462,7 +515,7 @@ function Update-Tooltip {
   $text = $script:T.tip
   if ($null -ne $script:Data) {
     $parts = foreach ($w in $script:Data.Windows) {
-      $name = if ($w.Kind -eq 'five_hour') { '5h' } else { '7d' }
+      $name = if ($w.Name) { $w.Name } elseif ($w.Kind -eq 'five_hour') { '5h' } else { '7d' }
       "$name $(Format-Percent $w.Percent)"
     }
     $text = 'Claude · ' + ($parts -join ' · ')

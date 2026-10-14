@@ -5,7 +5,19 @@
 
 import { toEpochMs } from './timeWindow'
 import { WINDOW_ORDER } from './windows'
-import type { RawLimit, UsageWindow } from './windows'
+import type { RawLimit, UsageWindow, WindowKind } from './windows'
+
+/** Crediti a importo, come "Crediti per sessioni cloud" nel popup di Claude. */
+export type Credit = {
+  id: string
+  limit: number
+  used: number
+  remaining: number
+  currency: string
+  expiresAt?: string
+}
+
+export type ServerExtras = { scoped: UsageWindow[]; credits: Credit[] }
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USAGE_HEADERS: Record<string, string> = { 'anthropic-beta': 'oauth-2025-04-20' }
@@ -86,4 +98,57 @@ export function retryAfterMs(header: string | undefined, now: number): number | 
   const at = Date.parse(header)
 
   return Number.isFinite(at) ? Math.max(0, at - now) : undefined
+}
+
+const GROUP_KIND: Record<string, WindowKind> = { session: 'five_hour', weekly: 'seven_day' }
+
+function finite(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v)
+}
+
+/**
+ * Ciò che il popup di Claude mostra oltre a 5 ore e settimanale:
+ * - i limiti di un singolo modello: voci di `limits` con `scope.model`
+ *   ("Settimanale · Fable");
+ * - i crediti a importo ("Crediti per sessioni cloud"): voci del primo livello
+ *   con `limit_dollars` e `remaining_dollars` numerici. Il nome del campo è un
+ *   nome in codice che cambia, quindi si riconoscono dalla forma.
+ */
+export function parseServerExtras(text: string): ServerExtras {
+  const out: ServerExtras = { scoped: [], credits: [] }
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return out
+  }
+  if (body === null || typeof body !== 'object') return out
+  const root = body as Record<string, unknown>
+
+  if (Array.isArray(root.limits)) {
+    for (const item of root.limits) {
+      if (item === null || typeof item !== 'object') continue
+      const { group, percent, resets_at, scope } = item as Record<string, unknown>
+      const kind = typeof group === 'string' ? GROUP_KIND[group] : undefined
+      const model = (scope as { model?: { display_name?: unknown } } | null | undefined)?.model
+      const name = typeof model?.display_name === 'string' ? model.display_name.trim() : ''
+      if (kind === undefined || name === '' || !finite(percent)) continue
+      if (out.scoped.some(w => w.kind === kind && w.name === name)) continue
+      const w: UsageWindow = { kind, label: name, name, percentUsed: Math.round(percent * 10) / 10 }
+      if (typeof resets_at === 'string' && toEpochMs(resets_at) !== undefined) w.resetsAt = resets_at
+      out.scoped.push(w)
+    }
+  }
+
+  for (const [id, value] of Object.entries(root)) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue
+    const { limit_dollars, used_dollars, remaining_dollars, resets_at } = value as Record<string, unknown>
+    if (!finite(limit_dollars) || !finite(remaining_dollars) || limit_dollars <= 0) continue
+    const used = finite(used_dollars) ? used_dollars : Math.max(0, limit_dollars - remaining_dollars)
+    const credit: Credit = { id, limit: limit_dollars, used, remaining: remaining_dollars, currency: 'USD' }
+    if (typeof resets_at === 'string' && toEpochMs(resets_at) !== undefined) credit.expiresAt = resets_at
+    out.credits.push(credit)
+  }
+
+  return out
 }

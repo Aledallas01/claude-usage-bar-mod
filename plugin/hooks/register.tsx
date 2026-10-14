@@ -6,14 +6,16 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
-import type { StoredContext, StoredLimits } from '../types'
+import type { StoredContext, StoredCredit, StoredLimits, StoredWindow } from '../types'
 import { readConfig } from './lib/config'
 import type { Config } from './lib/config'
 import { dict, normalizeLang } from './lib/i18n'
 import type { Lang } from './lib/i18n'
-import { accessibleSummary, contextText, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
-import { mergeWindows, parseServerUsage, retryAfterMs, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
+import { accessibleSummary, contextText, creditSummary, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
+import { mergeWindows, parseServerExtras, parseServerUsage, retryAfterMs, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
+import type { ServerExtras } from './lib/serverUsage'
 import { describeWindows, pickWindows } from './lib/windows'
+import type { WindowView } from './lib/windows'
 
 const limits = atom({ plugin: 'usage-time-bar', key: 'limits' } as const, null)
 const clockNow = atom({ plugin: 'usage-time-bar', key: 'now' } as const, 0)
@@ -95,15 +97,50 @@ function parseStored(value: unknown): StoredLimits | null {
   const stored: StoredLimits = { observedAt, windows: picked }
   const parsed = parseContext(context)
   if (parsed !== undefined) stored.context = parsed
+  const { scoped, credits, extrasAt } = value as Partial<StoredLimits>
+  if (typeof extrasAt === 'number') {
+    stored.extrasAt = extrasAt
+    stored.scoped = parseScoped(scoped)
+    stored.credits = parseCredits(credits)
+  }
 
   return stored
+}
+
+/** Limiti di un modello salvati: come pickWindows, ma tengono il nome. */
+function parseScoped(value: unknown): StoredWindow[] {
+  if (!Array.isArray(value)) return []
+
+  return value.flatMap(item => {
+    const { name } = (item ?? {}) as Partial<StoredWindow>
+    const [w] = pickWindows([item])
+    return w !== undefined && typeof name === 'string' && name !== '' ? [{ ...w, label: name, name }] : []
+  })
+}
+
+function parseCredits(value: unknown): StoredCredit[] {
+  if (!Array.isArray(value)) return []
+  const ok = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+
+  return value.flatMap(item => {
+    const c = (item ?? {}) as Partial<StoredCredit>
+    if (typeof c.id !== 'string' || !ok(c.limit) || !ok(c.used) || !ok(c.remaining)) return []
+    const credit: StoredCredit = { id: c.id, limit: c.limit!, used: c.used!, remaining: c.remaining!, currency: typeof c.currency === 'string' ? c.currency : 'USD' }
+    if (typeof c.expiresAt === 'string') credit.expiresAt = c.expiresAt
+    return [credit]
+  })
+}
+
+/** Tutte le finestre da mostrare: 5 ore, settimanale, poi i limiti per modello. */
+function viewsOf(stored: StoredLimits, now: number, config: Config): WindowView[] {
+  return describeWindows([...stored.windows, ...(stored.scoped ?? [])], now, config.durations)
 }
 
 async function refreshStatus($: EngineInterface, config: Config) {
   if (!config.showStatus) return
   const stored = await read($, limits)
   if (stored === null) return $.ui.status(undefined)
-  $.ui.status(statusText(describeWindows(stored.windows, await $.clock.now(), config.durations)))
+  $.ui.status(statusText(viewsOf(stored, await $.clock.now(), config)))
 }
 
 function signature(windows: StoredLimits['windows']): string {
@@ -122,6 +159,7 @@ async function adopt(
   incoming: StoredLimits['windows'],
   ownContext: StoredContext | undefined,
   isFresh = false,
+  extras?: ServerExtras,
 ) {
   let saved: StoredLimits | null = null
   try {
@@ -142,8 +180,24 @@ async function adopt(
   // Il contesto è della sessione viva, mai quello salvato da un'altra.
   const context = ownContext ?? current?.context
   if (context !== undefined) next.context = context
+  // Limiti per modello e crediti: solo dal server; vince la lettura più recente.
+  const newest = (saved?.extrasAt ?? 0) > (current?.extrasAt ?? 0) ? saved : current
+  if (extras !== undefined) {
+    next.scoped = extras.scoped
+    next.credits = extras.credits
+    next.extrasAt = now
+  } else if (newest?.extrasAt !== undefined) {
+    next.scoped = newest.scoped ?? []
+    next.credits = newest.credits ?? []
+    next.extrasAt = newest.extrasAt
+  }
   if (current === null || JSON.stringify(next) !== JSON.stringify(current)) await update($, limits, () => next)
-  if (saved === null || sig !== signature(saved.windows) || next.observedAt > saved.observedAt) {
+  if (
+    saved === null ||
+    sig !== signature(saved.windows) ||
+    next.observedAt > saved.observedAt ||
+    (next.extrasAt ?? 0) > (saved.extrasAt ?? 0)
+  ) {
     await $.store.set(STORE_LIMITS, next)
   }
 }
@@ -197,7 +251,7 @@ async function fetchServer($: EngineInterface, config: Config) {
   // leggere i campi che la mod non interpreta ancora.
   await $.store.set('serverRaw', res.text.slice(0, 20_000))
   const windows = pickWindows(parseServerUsage(res.text))
-  if (windows.length > 0) await adopt($, windows, undefined, true)
+  if (windows.length > 0) await adopt($, windows, undefined, true, parseServerExtras(res.text))
   await refreshStatus($, config)
 }
 
@@ -244,7 +298,7 @@ async function openPane($: EngineInterface) {
     focus: true,
     closeOnEscape: true,
     columns: 58,
-    rows: 10,
+    rows: 18,
   })
   await update($, isPaneOpen, () => opened.isPlaced)
 }
@@ -304,7 +358,8 @@ export const register: Register = (on, options) => {
       surface: e.surface,
       elements: $.ui.resolve(e),
       lang: await read($, lang),
-      views: describeWindows(stored.windows, now, config.durations),
+      views: viewsOf(stored, now, config),
+      credits: stored.credits,
       context: stored.context,
       now,
       observedAt: stored.observedAt,
@@ -325,7 +380,8 @@ export const register: Register = (on, options) => {
       surface: e.surface,
       elements,
       lang: l,
-      views: describeWindows(stored.windows, now, config.durations),
+      views: viewsOf(stored, now, config),
+      credits: stored.credits,
       context: stored.context,
       now,
       observedAt: stored.observedAt,
@@ -363,7 +419,7 @@ export const register: Register = (on, options) => {
       elements: $.ui.resolve(e),
       lang: await read($, lang),
       modes: e.props.modes,
-      views: stored === null ? [] : describeWindows(stored.windows, now, config.durations),
+      views: stored === null ? [] : viewsOf(stored, now, config),
       isOpen: open,
       onPress: () => void (open ? closePane($) : openPane($)),
     })
@@ -390,7 +446,8 @@ export const register: Register = (on, options) => {
     const stored = await read($, limits)
     if (stored === null) return { text: d.cmdNoData }
     const now = await $.clock.now()
-    const lines = describeWindows(stored.windows, now, config.durations).map(view => accessibleSummary(view, now, undefined, l))
+    const lines = viewsOf(stored, now, config).map(view => accessibleSummary(view, now, undefined, l))
+    for (const c of stored.credits ?? []) lines.push(creditSummary(c, now, undefined, l))
     if (stored.context !== undefined) lines.unshift(d.contextOf(contextText(stored.context)))
 
     return { text: lines.join('\n') }

@@ -235,4 +235,48 @@ describe('lettura dal server (come il popup di Claude)', () => {
     await clock.advance(60_000)
     expect(calls).toHaveLength(2)
   })
+
+  test('mostra Settimanale · Fable e i crediti cloud, anche nel pulsante', BAND_ON, async ($, on) => {
+    const { clock, shared } = engineBeneath(on, { rateLimits: LIMITS }, true)
+    server(on, {
+      ...SERVER,
+      cloud_bucket: { utilization: 0, resets_at: '2026-11-05T07:59:00+00:00', limit_dollars: 250, used_dollars: 12.5, remaining_dollars: 237.5 },
+      limits: [
+        { kind: 'weekly_scoped', group: 'weekly', percent: 91, resets_at: '2026-10-14T17:30:00Z', scope: { model: { display_name: 'Fable' } } },
+      ],
+    })
+    await start($)
+    await clock.advance(1)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: 'Settimanale · Fable' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^91%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Crediti per sessioni cloud' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '237,50 USD di 250 USD rimanenti' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Scade / })).toBeDefined()
+    await ui.unmount()
+    const button = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+    expect(await button.find({ type: 'Text', text: /Fable 91%/ })).toBeDefined()
+    await button.unmount()
+    // Salvati per le altre sessioni e per l'app nella barra.
+    const saved = shared.lastLimits as { scoped: { name: string }[]; credits: { remaining: number }[] }
+    expect(saved.scoped[0]?.name).toBe('Fable')
+    expect(saved.credits[0]?.remaining).toBe(237.5)
+  })
+
+  test('una sessione senza lettura dal server mostra Fable e crediti salvati da altre sessioni', BAND_ON, async ($, on) => {
+    const { clock, shared } = engineBeneath(on, { rateLimits: LIMITS })
+    await start($)
+    shared.lastLimits = {
+      observedAt: NOW + 1000,
+      windows: [{ kind: 'five_hour', label: 'Limite di sessione', percentUsed: 42, resetsAt: '2026-10-10T20:00:00Z' }],
+      scoped: [{ kind: 'seven_day', label: 'Fable', name: 'Fable', percentUsed: 91, resetsAt: '2026-10-14T17:30:00Z' }],
+      credits: [{ id: 'x', limit: 250, used: 0, remaining: 250, currency: 'USD' }],
+      extrasAt: NOW + 1000,
+    }
+    await clock.advance(TICK)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...BAND })
+    expect(await ui.find({ type: 'Text', text: 'Settimanale · Fable' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '250 USD di 250 USD rimanenti' })).toBeDefined()
+    await ui.unmount()
+  })
 })

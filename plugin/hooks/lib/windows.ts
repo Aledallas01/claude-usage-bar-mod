@@ -16,6 +16,8 @@ export type UsageWindow = {
   percentUsed: number
   /** Reset come comunicato da Claude (ISO 8601), invariato. */
   resetsAt?: string
+  /** Solo per i limiti di un singolo modello: il suo nome ("Fable"). */
+  name?: string
 }
 
 export const WINDOW_ORDER: readonly WindowKind[] = ['five_hour', 'seven_day']

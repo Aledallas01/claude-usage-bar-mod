@@ -19,6 +19,11 @@ export function normalizeLang(raw: string | undefined | null): Lang | undefined 
 
 export type Dict = {
   windowLabel: Record<WindowKind, string>
+  /** Limite di un singolo modello: "Settimanale · Fable". */
+  scopedLabel: Record<WindowKind, (name: string) => string>
+  creditsTitle: string
+  creditsRemaining: (remaining: string, limit: string) => string
+  creditsExpires: (when: string) => string
   cardTitle: string
   contextTitle: string
   usageReal: (pct: string) => string
@@ -60,6 +65,10 @@ export type Dict = {
 const DICTS: Record<Lang, Dict> = {
   it: {
     windowLabel: { five_hour: 'Limite di sessione', seven_day: 'Settimanale · tutti i modelli' },
+    scopedLabel: { five_hour: name => `Sessione · ${name}`, seven_day: name => `Settimanale · ${name}` },
+    creditsTitle: 'Crediti per sessioni cloud',
+    creditsRemaining: (remaining, limit) => `${remaining} di ${limit} rimanenti`,
+    creditsExpires: when => `Scade ${when}`,
     cardTitle: 'Limiti di utilizzo del piano · ritmo',
     contextTitle: 'Finestra di contesto',
     usageReal: pct => `Utilizzo reale ${pct}`,
@@ -104,6 +113,10 @@ const DICTS: Record<Lang, Dict> = {
   },
   en: {
     windowLabel: { five_hour: 'Session limit', seven_day: 'Weekly · all models' },
+    scopedLabel: { five_hour: name => `Session · ${name}`, seven_day: name => `Weekly · ${name}` },
+    creditsTitle: 'Cloud session credits',
+    creditsRemaining: (remaining, limit) => `${remaining} of ${limit} remaining`,
+    creditsExpires: when => `Expires ${when}`,
     cardTitle: 'Plan usage limits · pace',
     contextTitle: 'Context window',
     usageReal: pct => `Real usage ${pct}`,
