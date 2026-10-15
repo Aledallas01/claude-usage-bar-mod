@@ -202,6 +202,28 @@ namespace ClaudeTrayUi
         }
     }
 
+    /// Finestra che si mostra e si clicca senza prendere il focus: il popup dei
+    /// grafici resta accanto a quello dei limiti senza chiuderlo.
+    public class NoActivateForm : Form
+    {
+        public NoActivateForm()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        }
+
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x08000000 | 0x00000080; // WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW
+                return cp;
+            }
+        }
+    }
+
     /// Pannello con angoli arrotondati (le "schede" delle impostazioni).
     public class RoundPanel : Panel
     {

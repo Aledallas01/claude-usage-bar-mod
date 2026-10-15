@@ -33,7 +33,11 @@ $script:Strings = @{
     updNoGit = 'La cartella non è un clone git: scarica la release da GitHub.'
     nTitleHotkey = 'Scorciatoia non disponibile'; nBodyHotkey = '{0} è già usata da un altro programma: scegline un''altra nelle impostazioni.'
     winTitle = 'Impostazioni — Claude Limits Tray'; winVersion = 'Versione {0}'
-    gShow = 'Mostra grafici'; gHide = 'Nascondi grafici'
+    chartTitle = 'Andamento dei limiti'; chartSub = 'Utilizzo reale contro il ritmo ideale'; chartNow = 'adesso'; chartTip = 'Grafici'
+    chartUsed = '{0} usato'; chartNone = 'Nessun grafico: serve l''orario di reset dei limiti.'
+    projUnder = 'Al ritmo attuale arrivi a circa {0} al reset.'; projOver = 'Al ritmo attuale esaurisci il limite {0} (tra {1}).'
+    projNA = 'Proiezione disponibile dopo un po'' di utilizzo.'
+    legReal = 'utilizzo reale'; legIdeal = 'ritmo ideale'; legProj = 'proiezione'
     navIcon = 'Icona'; navPopup = 'Popup'; navNotify = 'Notifiche'; navUseIt = 'Usalo o lo perdi'; navUpdates = 'Aggiornamenti'
     pIcon = 'Il colore dell''orologio nella barra confronta l''utilizzo con il tempo trascorso.'
     pPopup = 'Cosa mostra il popup e come aprirlo.'
@@ -45,7 +49,7 @@ $script:Strings = @{
     segBoth = 'Entrambi'; segFive = '5 ore'; segSeven = 'Settimanale'
     cOrange = 'Arancione'; dOrange = 'Fino a quanti punti sotto il ritmo.'
     cRed = 'Rosso'; dRed = 'Oltre quanti punti sopra il ritmo.'
-    cGraph = 'Grafici dell''utilizzo'; dGraph = 'Aperti nel popup (si aprono e chiudono anche dal pulsante).'
+    cGraph = 'Grafici insieme ai limiti'; dGraph = 'Apri il popup dei grafici ogni volta (o dall''icona in basso a destra).'
     cHotkeyOn = 'Scorciatoia da tastiera'; dHotkeyOn = 'Apre e chiude il popup da qualsiasi programma.'
     cHotkey = 'Combinazione'; dHotkey = 'Clicca nel campo e premi i tasti.'
     cNotify = 'Notifiche'; dNotify = 'Soglie, ritmo e reset dei limiti.'
@@ -89,7 +93,11 @@ $script:Strings = @{
     updNoGit = 'The folder is not a git clone: download the release from GitHub.'
     nTitleHotkey = 'Shortcut unavailable'; nBodyHotkey = '{0} is already used by another app: pick another one in the settings.'
     winTitle = 'Settings — Claude Limits Tray'; winVersion = 'Version {0}'
-    gShow = 'Show charts'; gHide = 'Hide charts'
+    chartTitle = 'Limits over time'; chartSub = 'Real usage against the ideal pace'; chartNow = 'now'; chartTip = 'Charts'
+    chartUsed = '{0} used'; chartNone = 'No charts: the limits'' reset time is needed.'
+    projUnder = 'At this pace you reach about {0} by the reset.'; projOver = 'At this pace you run out {0} (in {1}).'
+    projNA = 'Projection available after some usage.'
+    legReal = 'real usage'; legIdeal = 'ideal pace'; legProj = 'projection'
     navIcon = 'Icon'; navPopup = 'Popup'; navNotify = 'Notifications'; navUseIt = 'Use it or lose it'; navUpdates = 'Updates'
     pIcon = 'The clock color in the taskbar compares usage with the time elapsed.'
     pPopup = 'What the popup shows and how to open it.'
@@ -101,7 +109,7 @@ $script:Strings = @{
     segBoth = 'Both'; segFive = '5-hour'; segSeven = 'Weekly'
     cOrange = 'Orange'; dOrange = 'Up to how many points behind pace.'
     cRed = 'Red'; dRed = 'Above how many points ahead of pace.'
-    cGraph = 'Usage charts'; dGraph = 'Open in the popup (the popup button toggles them too).'
+    cGraph = 'Charts with the limits'; dGraph = 'Open the charts popup every time (or from the bottom-right icon).'
     cHotkeyOn = 'Keyboard shortcut'; dHotkeyOn = 'Opens and closes the popup from any app.'
     cHotkey = 'Combination'; dHotkey = 'Click the field and press the keys.'
     cNotify = 'Notifications'; dNotify = 'Thresholds, pace and limit resets.'
@@ -276,7 +284,7 @@ function Get-DefaultSettings {
     colorIcon       = $true
     orangeBand      = 5           # arancione da 0 a 5 punti sotto il ritmo
     redAbove        = 0           # rosso oltre 0 punti sopra il ritmo
-    showGraph       = $false     # grafici chiusi: si aprono dal pulsante nel popup
+    showGraph       = $false     # popup dei grafici: si apre dall'icona in basso a destra
     useItEnabled    = $false      # "usalo o lo perdi": spento di base
     useItFiveMin    = 30
     useItSevenHours = 12
@@ -481,6 +489,20 @@ function Get-HistorySeries($w, [object[]]$own, [object[]]$claude, [long]$now) {
   }
   $points += [pscustomobject]@{ T = $now; P = [math]::Max($max, [double]$w.Percent) }
   return $points
+}
+
+# Proiezione lineare al ritmo medio della finestra fin qui: percentuale al reset
+# e, se supera il 100%, quando si esaurisce. $null se è troppo presto (meno del
+# 10% della finestra trascorso o meno dell'1% usato): la stima ballerebbe troppo.
+function Get-Projection($w, [long]$now) {
+  if ($null -eq $w.StartMs -or $w.ResetPassed) { return $null }
+  $span = [double]$w.ResetMs - [double]$w.StartMs
+  $frac = ($now - [double]$w.StartMs) / $span
+  if ($frac -lt 0.1 -or $w.Percent -lt 1) { return $null }
+  $atReset = $w.Percent / [math]::Min(1.0, $frac)
+  $hits = $null
+  if ($atReset -gt 100) { $hits = [long]([double]$w.StartMs + $span * $frac * 100.0 / $w.Percent) }
+  return [pscustomobject]@{ AtReset = $atReset; HitsLimitMs = $hits }
 }
 
 # --- Scorciatoia da tastiera ---

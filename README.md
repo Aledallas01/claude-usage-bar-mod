@@ -89,8 +89,8 @@ I testi (mod e app) si adattano **automaticamente** alla lingua di Windows: ital
 Oltre alla mod, in [tray/](tray/) c'è un **programma Windows**
 (`ClaudeLimitsTray.exe`, si disinstalla da *App installate*) che mette
 un'icona nell'area di notifica: al clic o con **Ctrl+Alt+L** apre lo stesso
-popup dei limiti, con i **grafici** dell'utilizzo contro il ritmo ideale (dal
-pulsante *Mostra grafici*). L'icona cambia colore secondo il ritmo (il peggiore
+popup dei limiti; l'icona in basso a destra del popup apre accanto un **popup
+dei grafici** (utilizzo reale contro il ritmo ideale, con la proiezione al reset). L'icona cambia colore secondo il ritmo (il peggiore
 tra 5 ore e settimanale), il programma manda **notifiche di Windows** (soglie,
 ritmo, reset, e se vuoi "usalo o lo perdi" e "non disturbare") e si **aggiorna
 con un clic** quando esce una nuova release. Tutto si regola dalla finestra

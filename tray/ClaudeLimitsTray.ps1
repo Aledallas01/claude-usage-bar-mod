@@ -131,44 +131,345 @@ $script:Data = $null
 $script:Scale = 1.0
 $script:HiddenAt = [datetime]::MinValue
 $PopupWidth = 384
-$GraphHeight = 34
+$FooterHeight = 28
 
 # Il grafico c'è solo per 5 ore e settimanale con il reset noto.
 function Test-CanGraph($w) { return -not $w.Name -and $null -ne $w.StartMs -and -not $w.ResetPassed }
-function Test-HasGraph($w) { return $script:Settings.showGraph -and (Test-CanGraph $w) }
+function Get-ChartWindows { if ($null -eq $script:Data) { return @() } return @($script:Data.Windows | Where-Object { Test-CanGraph $_ }) }
 
-# Pulsante "Mostra grafici" accanto al titolo (coordinate a 96 DPI).
-$script:GraphBtn = [System.Drawing.RectangleF]::Empty
-$script:GraphBtnHover = $false
-
-function Draw-GraphButton([System.Drawing.Graphics]$g, [single]$right, [single]$y, [System.Drawing.Font]$font) {
-  $text = if ($script:Settings.showGraph) { $script:T.gHide } else { $script:T.gShow }
-  $tw = $g.MeasureString($text, $font).Width
-  $w = [single]($tw + 30); $h = [single]18
-  $r = New-Object System.Drawing.RectangleF(($right - $w), ($y - 1), $w, $h)
-  $script:GraphBtn = $r
-  $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $d = $h
-  $path.AddArc($r.Left, $r.Top, $d, $d, 90, 180)
-  $path.AddArc(($r.Right - $d), $r.Top, $d, $d, 270, 180)
-  $path.CloseFigure()
-  $fill = New-Object System.Drawing.SolidBrush $(if ($script:GraphBtnHover) { $ColTrack } else { $ColField })
-  $pen = New-Object System.Drawing.Pen $(if ($script:Settings.showGraph) { $ColAccent } else { $ColBorder })
-  $g.FillPath($fill, $path); $g.DrawPath($pen, $path)
-  # tre barrette: l'icona del grafico
-  $bars = New-Object System.Drawing.SolidBrush $(if ($script:Settings.showGraph) { $ColAccent } else { $ColDim })
-  $bx = $r.Left + 8; $by = $r.Bottom - 5
-  foreach ($i in 0, 1, 2) { $bh = 3 + 2.5 * $i; $g.FillRectangle($bars, [single]($bx + $i * 3.2), [single]($by - $bh), [single]2.2, [single]$bh) }
-  $tb = New-Object System.Drawing.SolidBrush $ColText
-  $g.DrawString($text, $font, $tb, ($r.Left + 18), ($r.Top + 1.5))
-  foreach ($o in $fill, $pen, $bars, $tb, $path) { $o.Dispose() }
+function New-RoundPath([System.Drawing.RectangleF]$r, [single]$rad) {
+  $d = [single]($rad * 2)
+  $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+  $p.AddArc($r.Left, $r.Top, $d, $d, 180, 90)
+  $p.AddArc(($r.Right - $d), $r.Top, $d, $d, 270, 90)
+  $p.AddArc(($r.Right - $d), ($r.Bottom - $d), $d, $d, 0, 90)
+  $p.AddArc($r.Left, ($r.Bottom - $d), $d, $d, 90, 90)
+  $p.CloseFigure()
+  return $p
 }
 
-function Switch-Graphs {
-  $script:Settings.showGraph = -not $script:Settings.showGraph
-  Save-Settings
-  Place-Popup
+function Get-PaceText($w) {
+  $t = $script:T
+  $diff = [math]::Round($w.Percent - $w.Elapsed)
+  if ([math]::Abs($diff) -lt 1) { return $t.even }
+  if ($diff -gt 0) { return [string]::Format($t.ahead, $diff) }
+  return [string]::Format($t.behind, [math]::Abs($diff))
+}
+
+# Icona dei grafici in basso a destra nel popup (coordinate a 96 DPI).
+$script:ChartBtn = [System.Drawing.RectangleF]::Empty
+$script:ChartBtnHover = $false
+
+function Draw-ChartButton([System.Drawing.Graphics]$g, [single]$right, [single]$y) {
+  $r = New-Object System.Drawing.RectangleF(($right - 30), $y, [single]30, [single]22)
+  $script:ChartBtn = $r
+  $open = Test-ChartsOpen
+  if ($script:ChartBtnHover -or $open) {
+    $path = New-RoundPath $r 6
+    $fill = New-Object System.Drawing.SolidBrush $(if ($open) { [System.Drawing.Color]::FromArgb(55, $ColAccent) } else { $ColTrack })
+    $g.FillPath($fill, $path)
+    $fill.Dispose(); $path.Dispose()
+  }
+  # assi e una linea spezzata in salita
+  $color = if ($open) { $ColAccent } elseif ($script:ChartBtnHover) { $ColText } else { $ColDim }
+  $pen = New-Object System.Drawing.Pen $color, 1.5
+  $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+  $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+  $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+  $x0 = $r.Left + 9; $y0 = $r.Bottom - 6; $x1 = $r.Right - 8; $y1 = $r.Top + 6
+  $g.DrawLine($pen, $x0, $y1, $x0, $y0)
+  $g.DrawLine($pen, $x0, $y0, $x1, $y0)
+  $g.DrawLines($pen, [System.Drawing.PointF[]]@(
+    (New-Object System.Drawing.PointF(($x0 + 3), ($y0 - 3))),
+    (New-Object System.Drawing.PointF(($x0 + 6), ($y0 - 6.5))),
+    (New-Object System.Drawing.PointF(($x0 + 9), ($y0 - 4.5))),
+    (New-Object System.Drawing.PointF($x1, ($y1 + 0.5)))))
+  $pen.Dispose()
+}
+
+# --- Il popup dei grafici ---
+# Accanto a quello dei limiti, senza prendere il focus (così clic fuori ed Esc
+# chiudono entrambi). Per 5 ore e settimanale: utilizzo reale nel tempo contro il
+# ritmo ideale, scarto di adesso e proiezione al ritmo attuale.
+$script:ChartForm = $null
+$script:ChartClose = [System.Drawing.RectangleF]::Empty
+$script:ChartCloseHover = $false
+$ChartWidth = 420
+$ChartSection = 214
+
+function Test-ChartsOpen { return $null -ne $script:ChartForm -and -not $script:ChartForm.IsDisposed -and $script:ChartForm.Visible }
+
+function Measure-ChartHeight {
+  $n = @(Get-ChartWindows).Count
+  if ($n -eq 0) { return 110 }
+  return 64 + $n * $ChartSection + 34
+}
+
+# Ora sull'asse: "14:30" per le 5 ore, "gio 15 12:00" per il settimanale.
+function Format-ChartTime([double]$ms, [string]$kind) {
+  $local = [DateTimeOffset]::FromUnixTimeMilliseconds([long]([math]::Round($ms / 60000.0) * 60000)).LocalDateTime
+  if ($kind -eq 'five_hour') { return $local.ToString('HH:mm') }
+  return $local.ToString('ddd d HH:mm', $script:Culture)
+}
+
+function Draw-Chart([System.Drawing.Graphics]$g, [single]$x, [single]$y, [single]$w, [single]$h, $win, [System.Drawing.Font]$fTiny) {
+  $now = Get-NowMs
+  $start = [double]$win.StartMs
+  $span = [double]$win.ResetMs - $start
+  $top = $y + 8; $bot = $y + $h - 8; $ph = $bot - $top
+  $px = { param([double]$t) [single]($x + (Clamp01 (($t - $start) / $span)) * $w) }
+  $py = { param([double]$p) [single]($bot - (Clamp01 ($p / 100.0)) * $ph) }
+
+  $panel = New-Object System.Drawing.SolidBrush $ColPanel
+  $path = New-RoundPath (New-Object System.Drawing.RectangleF($x, $y, $w, $h)) 6
+  $g.FillPath($panel, $path)
+  $panel.Dispose(); $path.Dispose()
+
+  # griglia e percentuali
+  $grid = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(52, 52, 50)), 1
+  $bDim = New-Object System.Drawing.SolidBrush $ColDim
+  $sf = New-Object System.Drawing.StringFormat
+  $sf.Alignment = [System.Drawing.StringAlignment]::Far
+  $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+  foreach ($p in 0, 25, 50, 75, 100) {
+    $yy = & $py $p
+    $g.DrawLine($grid, $x, $yy, ($x + $w), $yy)
+    if ($p % 50 -eq 0) { $g.DrawString("$p%", $fTiny, $bDim, (New-Object System.Drawing.RectangleF(($x - 40), ($yy - 8), [single]34, [single]16)), $sf) }
+  }
+  $grid.Dispose(); $sf.Dispose(); $bDim.Dispose()
+
+  # ritmo ideale
+  $ideal = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(150, $ColDim)), 1.2
+  $ideal.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash
+  $g.DrawLine($ideal, $x, $bot, ($x + $w), $top)
+  $ideal.Dispose()
+
+  $paceColor = Get-PaceColor $win
+  $nowX = & $px $now
+  $nowY = & $py $win.Percent
+
+  # proiezione al ritmo attuale
+  $proj = Get-Projection $win $now
+  if ($null -ne $proj -and $win.Percent -lt 100) {
+    $pp = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(200, $paceColor)), 1.6
+    $pp.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dot
+    if ($null -ne $proj.HitsLimitMs) {
+      $hx = & $px $proj.HitsLimitMs
+      $g.DrawLine($pp, $nowX, $nowY, $hx, $top)
+      $mark = New-Object System.Drawing.SolidBrush $ColRed
+      $g.FillEllipse($mark, [single]($hx - 3), [single]($top - 3), [single]6, [single]6)
+      $mark.Dispose()
+    } else {
+      $g.DrawLine($pp, $nowX, $nowY, ($x + $w), (& $py $proj.AtReset))
+    }
+    $pp.Dispose()
+  }
+
+  # utilizzo reale
+  $series = @(Get-HistorySeries $win $script:OwnHistory $script:ClaudeHistory $now)
+  if ($series.Count -ge 2) {
+    $pts = New-Object 'System.Collections.Generic.List[System.Drawing.PointF]'
+    foreach ($p in $series) { $pts.Add((New-Object System.Drawing.PointF((& $px $p.T), (& $py $p.P)))) }
+    $last = $pts[$pts.Count - 1]
+    $area = New-Object 'System.Collections.Generic.List[System.Drawing.PointF]'
+    $area.AddRange($pts)
+    $area.Add((New-Object System.Drawing.PointF($last.X, $bot)))
+    $area.Add((New-Object System.Drawing.PointF($x, $bot)))
+    $fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(50, $ColBlue))
+    $g.FillPolygon($fill, $area.ToArray())
+    $fill.Dispose()
+    $line = New-Object System.Drawing.Pen $ColBlue, 2
+    $line.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    $g.DrawLines($line, $pts.ToArray())
+    $line.Dispose()
+  }
+
+  # adesso: linea verticale e scarto dal ritmo ideale
+  $nowPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(70, $ColText)), 1
+  $nowPen.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dot
+  $g.DrawLine($nowPen, $nowX, $top, $nowX, $bot)
+  $nowPen.Dispose()
+  $idealY = & $py $win.Elapsed
+  if ([math]::Abs($idealY - $nowY) -ge 2) {
+    $gap = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(220, $paceColor)), 3
+    $g.DrawLine($gap, $nowX, $idealY, $nowX, $nowY)
+    $gap.Dispose()
+  }
+  $ring = New-Object System.Drawing.SolidBrush $ColPanel
+  $dot = New-Object System.Drawing.SolidBrush $paceColor
+  $g.FillEllipse($ring, [single]($nowX - 5), [single]($nowY - 5), [single]10, [single]10)
+  $g.FillEllipse($dot, [single]($nowX - 3.5), [single]($nowY - 3.5), [single]7, [single]7)
+  $ring.Dispose(); $dot.Dispose()
+  return $nowX
+}
+
+function On-ChartPaint {
+  param($sender, [System.Windows.Forms.PaintEventArgs]$e)
+  try { On-ChartPaintCore $sender $e } catch { Write-TrayLog 'CHART' $_ }
+}
+
+function On-ChartPaintCore {
+  param($sender, [System.Windows.Forms.PaintEventArgs]$e)
+  $g = $e.Graphics
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+  $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::ClearTypeGridFit
+  $g.Clear($ColBg)
+  $s = [single]$script:Scale
+  $g.ScaleTransform($s, $s)
+  $cw = [single]$ChartWidth
+  $pad = [single]18
+  $t = $script:T
+
+  $fHead = New-PxFont 10.5 ([System.Drawing.FontStyle]::Bold)
+  $fName = New-PxFont 9.5 ([System.Drawing.FontStyle]::Bold)
+  $fVal = New-PxFont 9.5
+  $fSmall = New-PxFont 8.5
+  $fTiny = New-PxFont 7.5
+  $bText = New-Object System.Drawing.SolidBrush $ColText
+  $bDim = New-Object System.Drawing.SolidBrush $ColDim
+  $sfRight = New-Object System.Drawing.StringFormat
+  $sfRight.Alignment = [System.Drawing.StringAlignment]::Far
+  $sfCenter = New-Object System.Drawing.StringFormat
+  $sfCenter.Alignment = [System.Drawing.StringAlignment]::Center
+
+  # intestazione e ✕
+  $g.DrawString($t.chartTitle, $fHead, $bText, $pad, 14)
+  $g.DrawString($t.chartSub, $fSmall, $bDim, $pad, 36)
+  $script:ChartClose = New-Object System.Drawing.RectangleF(($cw - $pad - 22), [single]12, [single]22, [single]22)
+  $c = $script:ChartClose
+  if ($script:ChartCloseHover) {
+    $hp = New-RoundPath $c 5; $hb = New-Object System.Drawing.SolidBrush $ColTrack
+    $g.FillPath($hb, $hp); $hb.Dispose(); $hp.Dispose()
+  }
+  $xp = New-Object System.Drawing.Pen $(if ($script:ChartCloseHover) { $ColText } else { $ColDim }), 1.5
+  $g.DrawLine($xp, ($c.Left + 7), ($c.Top + 7), ($c.Right - 7), ($c.Bottom - 7))
+  $g.DrawLine($xp, ($c.Right - 7), ($c.Top + 7), ($c.Left + 7), ($c.Bottom - 7))
+  $xp.Dispose()
+
+  $y = [single]64
+  $wins = @(Get-ChartWindows)
+  if ($wins.Count -eq 0) { $g.DrawString($t.chartNone, $fSmall, $bDim, $pad, $y) }
+  $axisW = [single]36
+  $chartX = $pad + $axisW
+  $chartW = $cw - $pad - $chartX
+  foreach ($win in $wins) {
+    $now = Get-NowMs
+    $g.DrawString((Get-WindowTitle $win), $fName, $bText, $pad, $y)
+    $g.DrawString([string]::Format($t.chartUsed, (Format-Percent $win.Percent)), $fVal, $bText, ($cw - $pad), $y, $sfRight)
+    $y += 26
+    $nowX = Draw-Chart $g $chartX $y $chartW 120 $win $fTiny
+    $y += 124
+    # asse dei tempi: inizio, adesso, reset
+    $startText = Format-ChartTime $win.StartMs $win.Kind
+    $resetText = Format-ChartTime $win.ResetMs $win.Kind
+    $g.DrawString($startText, $fTiny, $bDim, $chartX, $y)
+    $g.DrawString($resetText, $fTiny, $bDim, ($chartX + $chartW), $y, $sfRight)
+    $leftEnd = $chartX + $g.MeasureString($startText, $fTiny).Width + 8
+    $rightStart = $chartX + $chartW - $g.MeasureString($resetText, $fTiny).Width - 8
+    $nowW = $g.MeasureString($t.chartNow, $fTiny).Width
+    if (($nowX - $nowW / 2) -gt $leftEnd -and ($nowX + $nowW / 2) -lt $rightStart) {
+      $g.DrawString($t.chartNow, $fTiny, $bText, $nowX, $y, $sfCenter)
+    }
+    $y += 20
+    # ritmo e proiezione
+    $bPace = New-Object System.Drawing.SolidBrush (Get-PaceColor $win)
+    $g.DrawString((Get-PaceText $win), $fSmall, $bPace, $pad, $y)
+    $bPace.Dispose()
+    $y += 17
+    $proj = Get-Projection $win $now
+    $projText = if ($win.Percent -ge 100) { '' }
+      elseif ($null -eq $proj) { $t.projNA }
+      elseif ($null -ne $proj.HitsLimitMs) { [string]::Format($t.projOver, (Format-ChartTime $proj.HitsLimitMs $win.Kind), (Format-Duration ([math]::Max(0, $proj.HitsLimitMs - $now)))) }
+      else { [string]::Format($t.projUnder, (Format-Percent ([math]::Round($proj.AtReset)))) }
+    $g.DrawString($projText, $fSmall, $bDim, $pad, $y)
+    $y += $ChartSection - 26 - 124 - 20 - 17
+  }
+
+  # legenda
+  if ($wins.Count -gt 0) {
+    $ly = [single]($y + 4)
+    $lx = $pad
+    foreach ($item in @(@('real', $t.legReal), @('ideal', $t.legIdeal), @('proj', $t.legProj))) {
+      $pen = switch ($item[0]) {
+        'real' { New-Object System.Drawing.Pen $ColBlue, 2 }
+        'ideal' { $p = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(150, $ColDim)), 1.2; $p.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash; $p }
+        default { $p = New-Object System.Drawing.Pen $ColDim, 1.6; $p.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dot; $p }
+      }
+      $g.DrawLine($pen, $lx, ($ly + 7), ($lx + 18), ($ly + 7))
+      $pen.Dispose()
+      $g.DrawString($item[1], $fTiny, $bDim, ($lx + 24), $ly)
+      $lx += 24 + $g.MeasureString($item[1], $fTiny).Width + 16
+    }
+  }
+
+  $g.ResetTransform()
+  $border = New-Object System.Drawing.Pen $ColBorder
+  $g.DrawRectangle($border, 0, 0, ($sender.ClientSize.Width - 1), ($sender.ClientSize.Height - 1))
+  $border.Dispose()
+  foreach ($o in $fHead, $fName, $fVal, $fSmall, $fTiny, $bText, $bDim, $sfRight, $sfCenter) { $o.Dispose() }
+}
+
+# A sinistra del popup dei limiti (a destra se non c'è spazio), allineato in basso.
+function Place-Charts {
+  $s = $script:Scale
+  $w = [int][math]::Round($ChartWidth * $s)
+  $h = [int][math]::Round((Measure-ChartHeight) * $s)
+  $main = $script:Form.Bounds
+  $gap = [int][math]::Round(8 * $s)
+  $wa = [System.Windows.Forms.Screen]::FromRectangle($main).WorkingArea
+  $left = $main.Left - $gap - $w
+  if ($left -lt $wa.Left) { $left = $main.Right + $gap }
+  $top = $main.Bottom - $h
+  if ($top -lt $wa.Top) { $top = $wa.Top + $gap }
+  $script:ChartForm.Bounds = New-Object System.Drawing.Rectangle($left, $top, $w, $h)
+}
+
+function Test-InChartRect([System.Drawing.RectangleF]$r, $e) {
+  return $r.Contains([single]($e.X / $script:Scale), [single]($e.Y / $script:Scale))
+}
+
+function Show-Charts {
+  if ($null -eq $script:Form -or $script:Form.IsDisposed -or -not $script:Form.Visible) { return }
+  if ($null -eq $script:ChartForm -or $script:ChartForm.IsDisposed) {
+    $f = New-Object ClaudeTrayUi.NoActivateForm
+    $f.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $f.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
+    $f.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $f.ShowInTaskbar = $false
+    $f.TopMost = $true
+    $f.BackColor = $ColBg
+    $f.add_Paint({ param($s, $e) On-ChartPaint $s $e })
+    $f.add_Shown({ param($s, $e) [ClaudeTrayUi.Dwm]::Round($s.Handle) })
+    $f.add_MouseMove({
+      param($s, $e)
+      $over = Test-InChartRect $script:ChartClose $e
+      if ($over -ne $script:ChartCloseHover) {
+        $script:ChartCloseHover = $over
+        $s.Cursor = if ($over) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
+        $s.Invalidate()
+      }
+    })
+    $f.add_MouseLeave({ param($s, $e) if ($script:ChartCloseHover) { $script:ChartCloseHover = $false; $s.Invalidate() } })
+    $f.add_MouseClick({ param($s, $e) if (Test-InChartRect $script:ChartClose $e) { Hide-Charts } })
+    $script:ChartForm = $f
+  }
+  Place-Charts
+  $script:ChartForm.Invalidate()
+  $script:ChartForm.Show()
   $script:Form.Invalidate()
+}
+
+function Hide-Charts {
+  if (Test-ChartsOpen) { $script:ChartForm.Hide() }
+  $script:ChartCloseHover = $false
+  if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) { $script:Form.Invalidate() }
+}
+
+function Toggle-Charts { if (Test-ChartsOpen) { Hide-Charts } else { Show-Charts } }
+
+function Hide-Popup {
+  Hide-Charts
+  if ($null -ne $script:Form -and -not $script:Form.IsDisposed) { $script:Form.Hide() }
 }
 
 function Measure-PopupHeight($data) {
@@ -176,8 +477,9 @@ function Measure-PopupHeight($data) {
   $h = 14
   if ($null -ne $data.Context) { $h += 44 }
   $h += 22  # titolo "Limiti di utilizzo del piano"
-  foreach ($w in $data.Windows) { $h += 54; if (Test-HasGraph $w) { $h += $GraphHeight + 14 } }
+  $h += $data.Windows.Count * 54
   $h += @($data.Credits).Count * 58
+  if (@(Get-ChartWindows).Count -gt 0) { $h += $FooterHeight }
   $h += 8   # margine inferiore
   return $h
 }
@@ -211,55 +513,6 @@ function Draw-Bar([System.Drawing.Graphics]$g, [int]$x, [int]$y, [int]$w, $win) 
     $g.FillRectangle($blue, $x, $y, $usagePx, 6)
   }
   $blue.Dispose(); $trackBrush.Dispose()
-}
-
-# Mini grafico della finestra: utilizzo reale nel tempo (blu) contro il ritmo
-# ideale (diagonale tratteggiata da 0% all'inizio a 100% al reset).
-function Draw-Graph([System.Drawing.Graphics]$g, [int]$x, [int]$y, [int]$w, [int]$h, $win) {
-  $now = Get-NowMs
-  $start = [double]$win.StartMs
-  $span = [double]$win.ResetMs - $start
-  if ($span -le 0) { return }
-  $panel = New-Object System.Drawing.SolidBrush $ColPanel
-  $g.FillRectangle($panel, $x, $y, $w, $h)
-  $panel.Dispose()
-  $px = { param([double]$t) [single]($x + (Clamp01 (($t - $start) / $span)) * $w) }
-  $py = { param([double]$p) [single]($y + $h - (Clamp01 ($p / 100.0)) * $h) }
-
-  # ritmo ideale
-  $ideal = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(140, $ColDim)), 1
-  $ideal.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dash
-  $g.DrawLine($ideal, [single]$x, [single]($y + $h), [single]($x + $w), [single]$y)
-  $ideal.Dispose()
-
-  # utilizzo reale
-  $series = @(Get-HistorySeries $win $script:OwnHistory $script:ClaudeHistory $now)
-  if ($series.Count -ge 2) {
-    $pts = New-Object 'System.Collections.Generic.List[System.Drawing.PointF]'
-    foreach ($p in $series) { $pts.Add((New-Object System.Drawing.PointF((& $px $p.T), (& $py $p.P)))) }
-    $last = $pts[$pts.Count - 1]
-    $area = New-Object 'System.Collections.Generic.List[System.Drawing.PointF]'
-    $area.AddRange($pts)
-    $area.Add((New-Object System.Drawing.PointF($last.X, [single]($y + $h))))
-    $area.Add((New-Object System.Drawing.PointF([single]$x, [single]($y + $h))))
-    $fill = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(55, $ColBlue))
-    $g.FillPolygon($fill, $area.ToArray())
-    $fill.Dispose()
-    $line = New-Object System.Drawing.Pen $ColBlue, 1.6
-    $line.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $g.DrawLines($line, $pts.ToArray())
-    $line.Dispose()
-    $dot = New-Object System.Drawing.SolidBrush (Get-PaceColor $win)
-    $g.FillEllipse($dot, [single]($last.X - 2.5), [single]($last.Y - 2.5), [single]5, [single]5)
-    $dot.Dispose()
-  }
-
-  # adesso
-  $nowX = & $px $now
-  $nowPen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90, $ColText)), 1
-  $nowPen.DashStyle = [System.Drawing.Drawing2D.DashStyle]::Dot
-  $g.DrawLine($nowPen, $nowX, [single]$y, $nowX, [single]($y + $h))
-  $nowPen.Dispose()
 }
 
 function On-Paint {
@@ -324,10 +577,6 @@ function On-PaintCore {
     }
 
     $g.DrawString($t.title, $fTitle, $bDim, $pad, $y)
-    $script:GraphBtn = [System.Drawing.RectangleF]::Empty
-    if (@($data.Windows | Where-Object { Test-CanGraph $_ }).Count -gt 0) {
-      Draw-GraphButton $g ([single]($cw - $pad)) ([single]$y) $fSmall
-    }
     $y += 20
 
     foreach ($win in $data.Windows) {
@@ -349,10 +598,6 @@ function On-PaintCore {
         $g.DrawString($t.stale, $fSmall, $bDim, $pad, $y)
       }
       $y += 18
-      if (Test-HasGraph $win) {
-        Draw-Graph $g $pad ($y + 2) $barW $GraphHeight $win
-        $y += $GraphHeight + 14
-      }
     }
 
     foreach ($c in @($data.Credits)) {
@@ -373,6 +618,9 @@ function On-PaintCore {
       }
       $y += 22
     }
+    # icona dei grafici in basso a destra
+    $script:ChartBtn = [System.Drawing.RectangleF]::Empty
+    if (@(Get-ChartWindows).Count -gt 0) { Draw-ChartButton $g ([single]($cw - $pad + 8)) ([single]($y + 2)) }
   }
 
   $g.ResetTransform()
@@ -408,23 +656,23 @@ function Show-Popup {
     # doppio buffering per evitare lo sfarfallio
     $script:Form.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance,NonPublic').SetValue($script:Form, $true, $null)
     $script:Form.add_Paint({ param($s, $e) On-Paint $s $e })
-    $script:Form.add_Deactivate({ $script:HiddenAt = [datetime]::UtcNow; $script:Form.Hide() })  # clic fuori → chiude
-    $script:Form.add_KeyDown({ param($s, $e) if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { $script:Form.Hide() } })
+    $script:Form.add_Deactivate({ $script:HiddenAt = [datetime]::UtcNow; Hide-Popup })  # clic fuori → chiude (anche i grafici)
+    $script:Form.add_KeyDown({ param($s, $e) if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Hide-Popup } })
     $script:Form.add_Shown({ param($s, $e) [ClaudeTrayUi.Dwm]::Round($s.Handle) })
     $script:Form.add_MouseMove({
       param($s, $e)
-      $over = $script:GraphBtn.Contains([single]($e.X / $script:Scale), [single]($e.Y / $script:Scale))
-      if ($over -ne $script:GraphBtnHover) {
-        $script:GraphBtnHover = $over
+      $over = $script:ChartBtn.Contains([single]($e.X / $script:Scale), [single]($e.Y / $script:Scale))
+      if ($over -ne $script:ChartBtnHover) {
+        $script:ChartBtnHover = $over
         $s.Cursor = if ($over) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
         $s.Invalidate()
       }
     })
-    $script:Form.add_MouseLeave({ param($s, $e) if ($script:GraphBtnHover) { $script:GraphBtnHover = $false; $s.Cursor = [System.Windows.Forms.Cursors]::Default; $s.Invalidate() } })
+    $script:Form.add_MouseLeave({ param($s, $e) if ($script:ChartBtnHover) { $script:ChartBtnHover = $false; $s.Cursor = [System.Windows.Forms.Cursors]::Default; $s.Invalidate() } })
     $script:Form.add_MouseClick({
       param($s, $e)
-      if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $script:GraphBtn.Contains([single]($e.X / $script:Scale), [single]($e.Y / $script:Scale))) {
-        try { Switch-Graphs } catch { Write-TrayLog 'GRAPH' $_ }
+      if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left -and $script:ChartBtn.Contains([single]($e.X / $script:Scale), [single]($e.Y / $script:Scale))) {
+        try { Toggle-Charts } catch { Write-TrayLog 'CHART' $_ }
       }
     })
   }
@@ -433,11 +681,12 @@ function Show-Popup {
   $script:Form.Show()
   $script:Form.Activate()
   [void][ClaudeTrayUi.Native]::SetForegroundWindow($script:Form.Handle)
+  if ($script:Settings.showGraph) { Show-Charts } elseif (Test-ChartsOpen) { Place-Charts; $script:ChartForm.Invalidate() }
 }
 
 function Toggle-Popup([bool]$fromHotkey) {
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
-    $script:Form.Hide()
+    Hide-Popup
     return
   }
   # Il clic sull'icona chiude il popup (perde il focus) un attimo prima di
@@ -1195,6 +1444,7 @@ function Refresh-Live([bool]$force) {
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
     Place-Popup
     $script:Form.Invalidate()
+    if (Test-ChartsOpen) { Place-Charts; $script:ChartForm.Invalidate() }
   }
 }
 

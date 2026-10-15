@@ -34,11 +34,19 @@ usato Claude Desktop almeno una volta (così il file dei dati esiste).
 
 - **Clic sinistro** sull'icona o **Ctrl+Alt+L** (da qualsiasi programma): apre/chiude il popup.
 - **Clic fuori** dal popup o **Esc**: lo chiude.
-- **Mostra grafici** (in alto a destra nel popup): sotto il limite di 5 ore e il
-  settimanale compare un piccolo grafico dall'inizio della finestra al reset,
-  con l'utilizzo reale (blu) e il ritmo ideale (diagonale tratteggiata). Se la
-  linea blu sta sotto la diagonale, sei sotto il ritmo. Lo storico è quello
-  registrato dal programma più quello che salva Claude Desktop.
+- **Icona dei grafici** (in basso a destra nel popup): apre accanto il popup
+  *Andamento dei limiti*. Per il limite di 5 ore e il settimanale c'è un grafico
+  dall'inizio della finestra al reset, con:
+  - l'utilizzo reale nel tempo (linea blu) e il ritmo ideale (diagonale
+    tratteggiata da 0% a 100%): se la linea blu sta sotto, sei sotto il ritmo;
+  - adesso: il punto colorato e il tratto verticale che misura lo scarto dal ritmo;
+  - la **proiezione** al ritmo attuale (puntini): "Al ritmo attuale arrivi a circa
+    20% al reset", oppure "esaurisci il limite alle 18:40 (tra 2 h)". Compare
+    dopo il primo 10% della finestra.
+
+  Lo storico è quello registrato dal programma più quello che salva Claude
+  Desktop. Si chiude con la ✕, con l'icona, oppure insieme al popup (clic fuori
+  o Esc). Dalle impostazioni si può farlo aprire sempre insieme ai limiti.
 - **Clic destro**: menu scuro con *Mostra i limiti*, *Aggiorna*, *Notifiche*
   (attiva/disattiva), *Colore dell'icona*, *Impostazioni…*, *Aggiorna alla
   vX.Y.Z* (quando c'è una nuova versione) ed *Esci*.
@@ -66,7 +74,7 @@ Dal menu, *Impostazioni…* apre una finestra con un menu laterale:
 | Sezione | Cosa si regola |
 | --- | --- |
 | Icona | icona colorata sì/no; limite che decide il colore (entrambi, solo 5 ore, solo settimanale); soglie dell'arancione e del rosso |
-| Popup | grafici aperti di base; scorciatoia da tastiera sì/no e combinazione |
+| Popup | popup dei grafici aperto insieme ai limiti; scorciatoia da tastiera sì/no e combinazione |
 | Notifiche | notifiche sì/no; soglie di utilizzo (75, 90); avviso di ritmo; **non disturbare** con la fascia oraria (spento di base) |
 | Usalo o lo perdi | avviso tipo "Tra 30 min si azzera e ti resta il 60%" (**spento di base**): preavviso per 5 ore e settimanale, quota minima rimasta |
 | Aggiornamenti | controllo automatico, "Controlla ora", aggiornamento con un clic, link al progetto e alla cartella dei dati |

@@ -231,6 +231,19 @@ Test 'serie del grafico: da 0 all inizio, mai in discesa, fino al valore attuale
   Assert-Equal $pts[-1].T $Now 'fine adesso'
 }
 
+Test 'proiezione al reset' {
+  $d = ConvertFrom-StoreJson (New-Store 20 18) $Now $Now   # 5 ore a metà finestra
+  $p = Get-Projection $d.Windows[0] $Now
+  Assert-Equal ([math]::Round($p.AtReset, 3)) 40 'il doppio a fine finestra'
+  Assert-Equal $p.HitsLimitMs $null
+  $d = ConvertFrom-StoreJson (New-Store 80 18) $Now $Now
+  $p = Get-Projection $d.Windows[0] $Now
+  Assert-Equal ([math]::Round($p.AtReset, 3)) 160
+  Assert-Equal $p.HitsLimitMs ($d.Windows[0].StartMs + [long](2.5 * 3600000 * 100 / 80)) 'esaurito dopo 3 h 7 min 30 s'
+  $early = $d.Windows[0].StartMs + 60000
+  Assert-Equal (Get-Projection (ConvertFrom-StoreJson (New-Store 5 1) $early $early).Windows[0] $early) $null 'troppo presto'
+}
+
 # --- Scorciatoia ---
 Test 'scorciatoie da tastiera' {
   $hk = ConvertFrom-HotkeyText 'Ctrl+Alt+L'
