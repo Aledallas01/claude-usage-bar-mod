@@ -6,6 +6,8 @@ import type { Elements, RenderElement } from 'claude-code'
 import { dict, LOCALES } from './i18n'
 import type { Lang } from './i18n'
 import type { Credit } from './serverUsage'
+import { roundUse } from './sessionUse'
+import type { SessionUse } from './sessionUse'
 import { formatDuration, formatPercent, formatResetTime, toEpochMs } from './timeWindow'
 import type { WindowView } from './windows'
 
@@ -221,6 +223,23 @@ export function deltaOf(view: WindowView): Delta | undefined {
   return { kind: diff > 0 ? 'over' : 'under', size: Math.abs(diff) }
 }
 
+const WINDOW_KINDS = ['five_hour', 'seven_day'] as const
+
+/**
+ * "Questa sessione: 5 ore +6% · settimanale +1% (stima)": quanto sono saliti i
+ * limiti durante i turni di questa sessione. undefined finché non c'è una lettura.
+ */
+export function sessionUseText(use: SessionUse | undefined, lang: Lang = 'it'): string | undefined {
+  if (use === undefined) return undefined
+  const d = dict(lang)
+  const parts = WINDOW_KINDS.flatMap(kind => {
+    const entry = use[kind]
+    return entry === undefined ? [] : [`${d.sessionKind[kind]} +${formatPercent(roundUse(entry.used))}`]
+  })
+
+  return parts.length === 0 ? undefined : d.sessionUse(parts.join(' · '))
+}
+
 export type TextBars = {
   /** [utilizzo fino al ritmo, tratto rosso/verde, resto vuoto] */
   usage: [string, string, string]
@@ -270,6 +289,8 @@ export type BandInput = {
   onClose?: () => void
   /** true quando la scheda riempie un riquadro (pane): niente bordo proprio. */
   isPane?: boolean
+  /** Consumo stimato di questa sessione. */
+  sessionUse?: SessionUse
 }
 
 /** Larghezza massima della scheda, in colonne: quella del popup dei limiti. */
@@ -358,6 +379,7 @@ export function renderBand(input: BandInput): RenderElement {
   const width = Math.max(24, Math.min(CARD_COLUMNS, input.bodyColumns))
   const barCells = Math.max(10, width - 4)
   const contextCells = context === undefined ? 0 : Math.round((Math.min(100, context.percent ?? 0) / 100) * barCells)
+  const sessionLine = sessionUseText(input.sessionUse, lang)
 
   const card = (
     <Box
@@ -425,6 +447,11 @@ export function renderBand(input: BandInput): RenderElement {
             </Box>
           )
         })}
+      {sessionLine !== undefined && (
+        <Box key="session-use" marginTop={1}>
+          <Text dimColor>{sessionLine}</Text>
+        </Box>
+      )}
       {(input.credits ?? []).map(credit => {
         const usedPct = credit.limit > 0 ? (credit.used / credit.limit) * 100 : 0
         const cells = Math.round((Math.min(100, Math.max(0, usedPct)) / 100) * barCells)

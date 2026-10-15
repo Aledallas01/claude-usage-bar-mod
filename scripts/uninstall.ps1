@@ -1,4 +1,4 @@
-# Disinstalla la mod e rimuove il marketplace locale.
+﻿# Disinstalla la mod e rimuove il marketplace locale.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\uninstall.ps1 -RestoreBackup

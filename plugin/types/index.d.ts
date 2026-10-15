@@ -38,6 +38,12 @@ declare module 'claude-code' {
       isHidden: boolean
       isPaneOpen: boolean
       lang: 'it' | 'en'
+      /** Consumo stimato di questa sessione, per finestra. */
+      sessionUse: Partial<Record<'five_hour' | 'seven_day', { resetsAt?: string; last: number; used: number }>>
+      /** Turni di questa sessione in corso. */
+      openTurns: number
+      /** Fine dell'ultimo turno (ms), 0 = nessuno. */
+      lastTurnEnd: number
     }
   }
 }

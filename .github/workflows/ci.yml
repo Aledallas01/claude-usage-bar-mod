@@ -1,0 +1,34 @@
+# Test automatici a ogni push e pull request.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tray:
+    name: Programma tray (Windows PowerShell 5.1)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintassi, parti native e logica
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tray\tests\run-tests.ps1
+      - name: Compilazione di ClaudeLimitsTray.exe
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tray\build-exe.ps1
+
+  mod:
+    name: Mod (validazione e test)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Claude Code CLI (le mod richiedono la 2.1.295 o successiva)
+        run: npm install -g @anthropic-ai/claude-code@2.1.300
+      - name: Validazione
+        run: claude plugin validate plugin
+      - name: Test
+        run: claude plugin test plugin

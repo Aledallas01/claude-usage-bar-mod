@@ -11,9 +11,10 @@ import { readConfig } from './lib/config'
 import type { Config } from './lib/config'
 import { dict, normalizeLang } from './lib/i18n'
 import type { Lang } from './lib/i18n'
-import { accessibleSummary, contextText, creditSummary, renderBand, renderEmptyCard, renderModeButton, statusText } from './lib/ui'
+import { accessibleSummary, contextText, creditSummary, renderBand, renderEmptyCard, renderModeButton, sessionUseText, statusText } from './lib/ui'
 import { mergeWindows, parseServerExtras, parseServerUsage, retryAfterMs, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
 import type { ServerExtras } from './lib/serverUsage'
+import { accrue, isSessionActive } from './lib/sessionUse'
 import { describeWindows, pickWindows } from './lib/windows'
 import type { WindowView } from './lib/windows'
 
@@ -22,6 +23,10 @@ const clockNow = atom({ plugin: 'usage-time-bar', key: 'now' } as const, 0)
 const isHidden = atom({ plugin: 'usage-time-bar', key: 'isHidden' } as const, false)
 const isPaneOpen = atom({ plugin: 'usage-time-bar', key: 'isPaneOpen' } as const, false)
 const lang = atom({ plugin: 'usage-time-bar', key: 'lang' } as const, 'it')
+// Consumo stimato di questa sessione: aumenti dei limiti visti durante i suoi turni.
+const sessionUse = atom({ plugin: 'usage-time-bar', key: 'sessionUse' } as const, {})
+const openTurns = atom({ plugin: 'usage-time-bar', key: 'openTurns' } as const, 0)
+const lastTurnEnd = atom({ plugin: 'usage-time-bar', key: 'lastTurnEnd' } as const, 0)
 
 /**
  * Lingua dell'interfaccia. In ordine: scelta forzata in configurazione; lingua
@@ -192,6 +197,7 @@ async function adopt(
     next.extrasAt = newest.extrasAt
   }
   if (current === null || JSON.stringify(next) !== JSON.stringify(current)) await update($, limits, () => next)
+  await trackSession($, windows, now)
   if (
     saved === null ||
     sig !== signature(saved.windows) ||
@@ -200,6 +206,14 @@ async function adopt(
   ) {
     await $.store.set(STORE_LIMITS, next)
   }
+}
+
+/** Conta gli aumenti dei limiti visti mentre questa sessione lavora. */
+async function trackSession($: EngineInterface, windows: StoredLimits['windows'], now: number) {
+  const active = isSessionActive(await read($, openTurns), await read($, lastTurnEnd), now)
+  const prev = await read($, sessionUse)
+  const next = accrue(prev, windows, active)
+  if (JSON.stringify(next) !== JSON.stringify(prev)) await update($, sessionUse, () => next)
 }
 
 function ownContextOf(context: SessionContextUsage | undefined): StoredContext | undefined {
@@ -336,6 +350,24 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Turni di questa sessione: gli aumenti dei limiti visti durante un turno (e
+  // poco dopo) contano come consumo della sessione. Non blocca mai il turno.
+  on('turn.start', async ($, e, next) => {
+    await update($, openTurns, n => n + 1)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('turn.complete', async ($, e, next) => {
+    // Le esecuzioni dei subagenti non hanno turn.start: girano dentro il turno principale.
+    if (e.agentId !== undefined) return next(e)
+    const now = await $.clock.now()
+    await update($, openTurns, n => Math.max(0, n - 1))
+    await update($, lastTurnEnd, () => now)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('rateLimits') || e.changed.includes('context')) {
       await remember($, config, e.rateLimits, e.context)
@@ -364,6 +396,7 @@ export const register: Register = (on, options) => {
       now,
       observedAt: stored.observedAt,
       bodyColumns: e.props.bodyColumns,
+      sessionUse: await read($, sessionUse),
     })
   })
 
@@ -387,6 +420,7 @@ export const register: Register = (on, options) => {
       observedAt: stored.observedAt,
       bodyColumns: e.props.bodyColumns,
       isPane: true,
+      sessionUse: await read($, sessionUse),
       onClose,
     })
   })
@@ -448,6 +482,8 @@ export const register: Register = (on, options) => {
     const now = await $.clock.now()
     const lines = viewsOf(stored, now, config).map(view => accessibleSummary(view, now, undefined, l))
     for (const c of stored.credits ?? []) lines.push(creditSummary(c, now, undefined, l))
+    const session = sessionUseText(await read($, sessionUse), l)
+    if (session !== undefined) lines.push(`${session}.`)
     if (stored.context !== undefined) lines.unshift(d.contextOf(contextText(stored.context)))
 
     return { text: lines.join('\n') }

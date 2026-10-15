@@ -1,4 +1,4 @@
-# Funzioni condivise dagli script di installazione e disinstallazione.
+﻿# Funzioni condivise dagli script di installazione e disinstallazione.
 
 $ErrorActionPreference = 'Stop'
 

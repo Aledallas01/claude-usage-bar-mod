@@ -1,4 +1,4 @@
-# Porta l'installazione alla versione attuale della cartella plugin\.
+﻿# Porta l'installazione alla versione attuale della cartella plugin\.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\update.ps1
 #

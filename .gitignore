@@ -7,3 +7,6 @@ backup/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# Eseguibile compilato in locale da tray\build-exe.ps1
+tray/bin/

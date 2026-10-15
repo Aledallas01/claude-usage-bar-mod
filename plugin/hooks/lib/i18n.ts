@@ -55,6 +55,9 @@ export type Dict = {
   theoretical: string
   pace: string
   contextOf: (text: string) => string
+  /** "Questa sessione: 5 ore +6% · settimanale +1% (stima)" */
+  sessionUse: (parts: string) => string
+  sessionKind: Record<WindowKind, string>
   // comando /usage-time
   cmdDescription: string
   cmdArgHint: string
@@ -106,6 +109,8 @@ const DICTS: Record<Lang, Dict> = {
     theoretical: 'progressione temporale teorica, calcolata dalla mod',
     pace: 'Ritmo',
     contextOf: text => `Finestra di contesto: ${text} (dato del motore).`,
+    sessionUse: parts => `Questa sessione: ${parts} (stima)`,
+    sessionKind: { five_hour: '5 ore', seven_day: 'settimanale' },
     cmdDescription: 'Utilizzo reale e tempo trascorso dei limiti di 5 ore e 7 giorni',
     cmdArgHint: '[mostra|nascondi|dettagli]',
     cmdHiddenOk: 'Fascia fissa nascosta. Usa /usage-time per il popup o /usage-time mostra per la fascia.',
@@ -154,6 +159,8 @@ const DICTS: Record<Lang, Dict> = {
     theoretical: 'theoretical time progression, computed by the mod',
     pace: 'Pace',
     contextOf: text => `Context window: ${text} (engine value).`,
+    sessionUse: parts => `This session: ${parts} (estimate)`,
+    sessionKind: { five_hour: '5-hour', seven_day: 'weekly' },
     cmdDescription: 'Real usage and time elapsed for the 5-hour and 7-day limits',
     cmdArgHint: '[show|hide|details]',
     cmdHiddenOk: 'Fixed band hidden. Use /usage-time for the popup or /usage-time show for the band.',

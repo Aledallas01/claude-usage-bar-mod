@@ -1,5 +1,7 @@
 # Usage Time Bar per Claude Desktop (Windows)
 
+[![CI](https://github.com/Aledallas01/claude-usage-bar-mod/actions/workflows/ci.yml/badge.svg)](https://github.com/Aledallas01/claude-usage-bar-mod/actions/workflows/ci.yml)
+
 Mod che affianca all'**utilizzo reale** dei limiti di 5 ore e settimanale la
 **progressione temporale teorica** della finestra:
 
@@ -68,6 +70,13 @@ di Claude: dentro la stessa finestra vince sempre il valore più alto, così una
 lettura in ritardo non riporta indietro la percentuale; dopo il reset vince la
 finestra nuova. Il contesto resta quello di ciascuna sessione.
 
+**Consumo di questa sessione.** In fondo alla scheda c'è la riga "Questa
+sessione: 5 ore +6% · settimanale +1% (stima)": quanto sono saliti i limiti
+mentre questa sessione lavorava (durante i suoi turni e per 2 minuti dopo). I
+limiti sono dell'account, quindi è una stima: se nello stesso momento lavora
+un'altra sessione o claude.ai, il suo consumo può finire anche qui. Riparte da
+zero a ogni nuova sessione e a ogni reset della finestra.
+
 Comando: `/usage-time` (apre il popup e scrive il riepilogo), `/usage-time mostra` /
 `/usage-time nascondi` (fascia fissa sopra il prompt).
 
@@ -77,16 +86,19 @@ I testi (mod e app) si adattano **automaticamente** alla lingua di Windows: ital
 
 ## Icona nella barra di Windows (programma separato)
 
-Oltre alla mod, in [tray/](tray/) c'è un **programma Windows** che mette
-un'icona nell'area di notifica (vicino all'orologio): al clic apre lo stesso
-popup dei limiti, con clic-fuori/Esc per chiudere. L'icona cambia colore
-secondo il ritmo del limite di 5 ore e il programma manda **notifiche di Windows**
-alle soglie del 75% e 90%, quando vai troppo sopra il ritmo e quando un limite si
-azzera. Legge i dati che la mod salva
-in `~\.claude\plugins\store\usage-time-bar_*.json` (nessuna rete, nessuna
-credenziale). Installazione: `powershell -ExecutionPolicy Bypass -File
-tray\install-tray.ps1`. Dettagli in
-[tray/README.md](tray/README.md).
+Oltre alla mod, in [tray/](tray/) c'è un **programma Windows**
+(`ClaudeLimitsTray.exe`, si disinstalla da *App installate*) che mette
+un'icona nell'area di notifica: al clic o con **Ctrl+Alt+L** apre lo stesso
+popup dei limiti, con i **grafici** dell'utilizzo contro il ritmo ideale (dal
+pulsante *Mostra grafici*). L'icona cambia colore secondo il ritmo (il peggiore
+tra 5 ore e settimanale), il programma manda **notifiche di Windows** (soglie,
+ritmo, reset, e se vuoi "usalo o lo perdi" e "non disturbare") e si **aggiorna
+con un clic** quando esce una nuova release. Tutto si regola dalla finestra
+*Impostazioni*. Legge i dati che la mod salva in
+`~\.claude\plugins\store\usage-time-bar_*.json` (nessuna credenziale; l'unica
+richiesta di rete è il controllo delle release su GitHub, disattivabile).
+Installazione: `powershell -ExecutionPolicy Bypass -File tray\install-tray.ps1`.
+Dettagli in [tray/README.md](tray/README.md).
 
 ## Requisiti
 
@@ -209,6 +221,16 @@ ClaudeUsageBarMod/
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\check.ps1
 ```
+
+Test del programma tray (sintassi, parti native, logica), senza dipendenze:
+
+```bash
+powershell -ExecutionPolicy Bypass -File tray\tests\run-tests.ps1
+```
+
+A ogni push GitHub Actions ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+esegue questi test su Windows, compila `ClaudeLimitsTray.exe` e lancia
+validazione e test della mod con la CLI di Claude Code.
 
 ## Licenza e avvertenze
 

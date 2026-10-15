@@ -44,6 +44,8 @@ function engineBeneath(on: On, own: { rateLimits: SessionRateLimit[] }, isSubscr
   // Con abbonamento il motore dà un handle opaco per la richiesta al server.
   on('session.authorize', () => ({ value: isSubscribed ? { handle: 'h-1', kind: 'bearer' as const } : null }))
   on('ui.status', () => ({ value: undefined }))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: 'it', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
@@ -116,6 +118,35 @@ describe('aggiornamento in tempo reale', () => {
     const saved = shared.lastLimits as { observedAt: number; windows: { percentUsed: number }[] }
     expect(saved.windows[0]?.percentUsed).toBe(60)
     expect(saved.observedAt).toBe(NOW + TICK)
+  })
+})
+
+describe('consumo di questa sessione', () => {
+  test('conta solo gli aumenti visti durante i turni di questa sessione', BAND_ON, async ($, on) => {
+    const own = { rateLimits: LIMITS }
+    const { clock, shared } = engineBeneath(on, own)
+    await start($)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: /Questa sessione: 5 ore \+0% · settimanale \+0%/ })).toBeDefined()
+
+    // Un'altra sessione consuma mentre questa è ferma: non conta.
+    otherSessionWrites(shared, NOW + 5_000, 50)
+    await clock.advance(TICK)
+
+    // Turno di questa sessione: il limite di 5 ore sale di 6 punti.
+    await $.turn.start({ text: 'ciao', turnId: 't-1' })
+    own.rateLimits = [{ ...LIMITS[0]!, percentUsed: 56 }, { ...LIMITS[1]!, percentUsed: 19.5 }]
+    await clock.advance(TICK)
+    await $.turn.complete({ answer: 'ok', durationMs: 1000, isAborted: false, turnId: 't-1', reason: 'answer' })
+    expect(await ui.find({ type: 'Text', text: /Questa sessione: 5 ore \+6% · settimanale \+1%/ })).toBeDefined()
+
+    // Molto dopo la fine del turno, gli aumenti sono di altri.
+    await clock.advance(5 * 60_000)
+    otherSessionWrites(shared, NOW + 6 * 60_000, 70)
+    await clock.advance(TICK)
+    expect(await ui.find({ type: 'Text', text: /^70%$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /Questa sessione: 5 ore \+6%/ })).toBeDefined()
+    await ui.unmount()
   })
 })
 

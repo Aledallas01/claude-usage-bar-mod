@@ -1,6 +1,6 @@
 {
   "name": "usage-time-bar",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": { "name": "bookst" },
   "description": "Affianca ai limiti di 5 ore e 7 giorni la progressione temporale teorica della finestra.",
   "types": "./types/index.d.ts",
