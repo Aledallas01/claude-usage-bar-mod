@@ -335,6 +335,15 @@ describe('tratto verde / rosso rispetto al ritmo', () => {
     await ui.unmount()
   })
 
+  test('allo 0% è verde anche a inizio finestra', async ($, on) => {
+    // 5 h: 0% con 2 minuti trascorsi su 300 (0,7 pt sotto il ritmo)
+    engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 0, resetsAt: '2026-10-10T22:28:00Z' }, LIMITS[1]!])
+    await start($)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+    expect((await ui.find({ type: 'Text', text: /5h 0%/ }))?.props.color).toBe('success')
+    await ui.unmount()
+  })
+
   test('terminale: il tratto oltre il ritmo è rosso', BAND_ON, async ($, on) => {
     engineBeneath(on, [{ ...LIMITS[0]!, percentUsed: 70 }])
     await start($)

@@ -163,15 +163,14 @@ $script:ChartBtnHover = $false
 function Draw-ChartButton([System.Drawing.Graphics]$g, [single]$right, [single]$y) {
   $r = New-Object System.Drawing.RectangleF(($right - 30), $y, [single]30, [single]22)
   $script:ChartBtn = $r
-  $open = Test-ChartsOpen
-  if ($script:ChartBtnHover -or $open) {
+  if ($script:ChartBtnHover) {
     $path = New-RoundPath $r 6
-    $fill = New-Object System.Drawing.SolidBrush $(if ($open) { [System.Drawing.Color]::FromArgb(55, $ColAccent) } else { $ColTrack })
+    $fill = New-Object System.Drawing.SolidBrush $ColTrack
     $g.FillPath($fill, $path)
     $fill.Dispose(); $path.Dispose()
   }
   # assi e una linea spezzata in salita
-  $color = if ($open) { $ColAccent } elseif ($script:ChartBtnHover) { $ColText } else { $ColDim }
+  $color = if ($script:ChartBtnHover) { $ColText } else { $ColDim }
   $pen = New-Object System.Drawing.Pen $color, 1.5
   $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
   $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
@@ -188,13 +187,15 @@ function Draw-ChartButton([System.Drawing.Graphics]$g, [single]$right, [single]$
 }
 
 # --- Il popup dei grafici ---
-# Accanto a quello dei limiti, senza prendere il focus (così clic fuori ed Esc
-# chiudono entrambi). Per 5 ore e settimanale: utilizzo reale nel tempo contro il
-# ritmo ideale, scarto di adesso e proiezione al ritmo attuale.
+# Prende il posto di quello dei limiti, nella stessa posizione; ‹ torna ai
+# limiti, clic fuori ed Esc lo chiudono. Per 5 ore e settimanale: utilizzo reale
+# nel tempo contro il ritmo ideale, scarto di adesso e proiezione al ritmo attuale.
 $script:ChartForm = $null
 $script:ChartClose = [System.Drawing.RectangleF]::Empty
 $script:ChartCloseHover = $false
-$ChartWidth = 420
+$script:ChartBack = [System.Drawing.RectangleF]::Empty
+$script:ChartBackHover = $false
+$ChartWidth = $PopupWidth  # stessa larghezza: i grafici prendono il posto dei limiti
 $ChartSection = 214
 
 function Test-ChartsOpen { return $null -ne $script:ChartForm -and -not $script:ChartForm.IsDisposed -and $script:ChartForm.Visible }
@@ -332,9 +333,22 @@ function On-ChartPaintCore {
   $sfCenter = New-Object System.Drawing.StringFormat
   $sfCenter.Alignment = [System.Drawing.StringAlignment]::Center
 
-  # intestazione e ✕
-  $g.DrawString($t.chartTitle, $fHead, $bText, $pad, 14)
-  $g.DrawString($t.chartSub, $fSmall, $bDim, $pad, 36)
+  # intestazione: ‹ (torna ai limiti), titolo, ✕
+  $script:ChartBack = New-Object System.Drawing.RectangleF(($pad - 6), [single]12, [single]22, [single]22)
+  $b = $script:ChartBack
+  if ($script:ChartBackHover) {
+    $hp = New-RoundPath $b 5; $hb = New-Object System.Drawing.SolidBrush $ColTrack
+    $g.FillPath($hb, $hp); $hb.Dispose(); $hp.Dispose()
+  }
+  $bp = New-Object System.Drawing.Pen $(if ($script:ChartBackHover) { $ColText } else { $ColDim }), 1.7
+  $bp.StartCap = [System.Drawing.Drawing2D.LineCap]::Round; $bp.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+  $g.DrawLines($bp, [System.Drawing.PointF[]]@(
+    (New-Object System.Drawing.PointF(($b.Left + 13), ($b.Top + 6))),
+    (New-Object System.Drawing.PointF(($b.Left + 8), ($b.Top + 11))),
+    (New-Object System.Drawing.PointF(($b.Left + 13), ($b.Top + 16)))))
+  $bp.Dispose()
+  $g.DrawString($t.chartTitle, $fHead, $bText, ($pad + 22), 14)
+  $g.DrawString($t.chartSub, $fSmall, $bDim, ($pad + 22), 36)
   $script:ChartClose = New-Object System.Drawing.RectangleF(($cw - $pad - 22), [single]12, [single]22, [single]22)
   $c = $script:ChartClose
   if ($script:ChartCloseHover) {
@@ -409,19 +423,12 @@ function On-ChartPaintCore {
   foreach ($o in $fHead, $fName, $fVal, $fSmall, $fTiny, $bText, $bDim, $sfRight, $sfCenter) { $o.Dispose() }
 }
 
-# A sinistra del popup dei limiti (a destra se non c'è spazio), allineato in basso.
+# Nello stesso angolo del popup dei limiti.
 function Place-Charts {
   $s = $script:Scale
   $w = [int][math]::Round($ChartWidth * $s)
   $h = [int][math]::Round((Measure-ChartHeight) * $s)
-  $main = $script:Form.Bounds
-  $gap = [int][math]::Round(8 * $s)
-  $wa = [System.Windows.Forms.Screen]::FromRectangle($main).WorkingArea
-  $left = $main.Left - $gap - $w
-  if ($left -lt $wa.Left) { $left = $main.Right + $gap }
-  $top = $main.Bottom - $h
-  if ($top -lt $wa.Top) { $top = $wa.Top + $gap }
-  $script:ChartForm.Bounds = New-Object System.Drawing.Rectangle($left, $top, $w, $h)
+  $script:ChartForm.Bounds = Get-CornerPlacement $script:PopupAnchor $w $h $s
 }
 
 function Test-InChartRect([System.Drawing.RectangleF]$r, $e) {
@@ -429,43 +436,66 @@ function Test-InChartRect([System.Drawing.RectangleF]$r, $e) {
 }
 
 function Show-Charts {
-  if ($null -eq $script:Form -or $script:Form.IsDisposed -or -not $script:Form.Visible) { return }
   if ($null -eq $script:ChartForm -or $script:ChartForm.IsDisposed) {
-    $f = New-Object ClaudeTrayUi.NoActivateForm
+    $f = New-Object System.Windows.Forms.Form
     $f.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
     $f.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
     $f.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
     $f.ShowInTaskbar = $false
     $f.TopMost = $true
+    $f.KeyPreview = $true
     $f.BackColor = $ColBg
+    $f.GetType().GetProperty('DoubleBuffered', [System.Reflection.BindingFlags]'Instance,NonPublic').SetValue($f, $true, $null)
     $f.add_Paint({ param($s, $e) On-ChartPaint $s $e })
     $f.add_Shown({ param($s, $e) [ClaudeTrayUi.Dwm]::Round($s.Handle) })
+    $f.add_Deactivate({ $script:HiddenAt = [datetime]::UtcNow; Hide-Charts })  # clic fuori → chiude
+    $f.add_KeyDown({
+      param($s, $e)
+      if ($e.KeyCode -eq [System.Windows.Forms.Keys]::Escape) { Hide-Charts }
+      elseif ($e.KeyCode -eq [System.Windows.Forms.Keys]::Back) { Show-Limits }
+    })
     $f.add_MouseMove({
       param($s, $e)
-      $over = Test-InChartRect $script:ChartClose $e
-      if ($over -ne $script:ChartCloseHover) {
-        $script:ChartCloseHover = $over
-        $s.Cursor = if ($over) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
+      $close = Test-InChartRect $script:ChartClose $e
+      $back = Test-InChartRect $script:ChartBack $e
+      if ($close -ne $script:ChartCloseHover -or $back -ne $script:ChartBackHover) {
+        $script:ChartCloseHover = $close
+        $script:ChartBackHover = $back
+        $s.Cursor = if ($close -or $back) { [System.Windows.Forms.Cursors]::Hand } else { [System.Windows.Forms.Cursors]::Default }
         $s.Invalidate()
       }
     })
-    $f.add_MouseLeave({ param($s, $e) if ($script:ChartCloseHover) { $script:ChartCloseHover = $false; $s.Invalidate() } })
-    $f.add_MouseClick({ param($s, $e) if (Test-InChartRect $script:ChartClose $e) { Hide-Charts } })
+    $f.add_MouseLeave({ param($s, $e) if ($script:ChartCloseHover -or $script:ChartBackHover) { $script:ChartCloseHover = $false; $script:ChartBackHover = $false; $s.Invalidate() } })
+    $f.add_MouseClick({
+      param($s, $e)
+      if ($e.Button -ne [System.Windows.Forms.MouseButtons]::Left) { return }
+      if (Test-InChartRect $script:ChartClose $e) { Hide-Charts }
+      elseif (Test-InChartRect $script:ChartBack $e) { Show-Limits }
+    })
     $script:ChartForm = $f
   }
+  # Prima via i limiti, poi i grafici nello stesso angolo.
+  if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) { $script:Form.Hide() }
   Place-Charts
   $script:ChartForm.Invalidate()
   $script:ChartForm.Show()
-  $script:Form.Invalidate()
+  $script:ChartForm.Activate()
+  [void][ClaudeTrayUi.Native]::SetForegroundWindow($script:ChartForm.Handle)
 }
 
 function Hide-Charts {
   if (Test-ChartsOpen) { $script:ChartForm.Hide() }
   $script:ChartCloseHover = $false
-  if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) { $script:Form.Invalidate() }
+  $script:ChartBackHover = $false
 }
 
-function Toggle-Charts { if (Test-ChartsOpen) { Hide-Charts } else { Show-Charts } }
+# ‹ dai grafici (o Backspace): torna ai limiti nello stesso punto.
+function Show-Limits {
+  Hide-Charts
+  Show-Popup $true
+}
+
+function Toggle-Charts { if (Test-ChartsOpen) { Show-Limits } else { Show-Charts } }
 
 function Hide-Popup {
   Hide-Charts
@@ -639,11 +669,16 @@ function Place-Popup {
   $script:Form.Bounds = Get-CornerPlacement $script:PopupAnchor $w $h $s
 }
 
-function Show-Popup {
+# $limitsOnly: dai grafici si torna sempre ai limiti, nello stesso punto.
+function Show-Popup([bool]$limitsOnly = $false) {
   $script:Data = Get-LimitsData $script:StoreDir
   Update-History
-  $script:PopupAnchor = [System.Windows.Forms.Cursor]::Position
-  $script:Scale = Get-ScaleAt $script:PopupAnchor
+  if (-not $limitsOnly -or $null -eq $script:PopupAnchor) {
+    $script:PopupAnchor = [System.Windows.Forms.Cursor]::Position
+    $script:Scale = Get-ScaleAt $script:PopupAnchor
+  }
+  # Impostazione "apri prima i grafici".
+  if (-not $limitsOnly -and $script:Settings.showGraph -and @(Get-ChartWindows).Count -gt 0) { Show-Charts; return }
   if ($null -eq $script:Form -or $script:Form.IsDisposed) {
     $script:Form = New-Object System.Windows.Forms.Form
     $script:Form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -681,11 +716,10 @@ function Show-Popup {
   $script:Form.Show()
   $script:Form.Activate()
   [void][ClaudeTrayUi.Native]::SetForegroundWindow($script:Form.Handle)
-  if ($script:Settings.showGraph) { Show-Charts } elseif (Test-ChartsOpen) { Place-Charts; $script:ChartForm.Invalidate() }
 }
 
 function Toggle-Popup([bool]$fromHotkey) {
-  if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
+  if ((Test-ChartsOpen) -or ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible)) {
     Hide-Popup
     return
   }
@@ -1444,8 +1478,8 @@ function Refresh-Live([bool]$force) {
   if ($null -ne $script:Form -and -not $script:Form.IsDisposed -and $script:Form.Visible) {
     Place-Popup
     $script:Form.Invalidate()
-    if (Test-ChartsOpen) { Place-Charts; $script:ChartForm.Invalidate() }
   }
+  if (Test-ChartsOpen) { Place-Charts; $script:ChartForm.Invalidate() }
 }
 
 $script:Timer = New-Object System.Windows.Forms.Timer

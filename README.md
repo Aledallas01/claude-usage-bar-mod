@@ -25,7 +25,7 @@ Così si vede subito se si consuma più in fretta del tempo che passa.
 Nel piede del prompt della scheda Code, accanto all'indicatore dei limiti di
 Claude, compare il pulsante **⏱ 5h 42% · 7d 23% · Fable 91%**: ogni finestra è **rossa** se
 sei sopra il ritmo (anche di poco), **arancione** se sei sotto di 0–5 punti,
-**verde** se sei sotto di più di 5 punti. Premendolo si apre un riquadro (pane) sopra
+**verde** se sei sotto di più di 5 punti o allo 0%. Premendolo si apre un riquadro (pane) sopra
 il prompt, costruito come il popup dei limiti di Claude: "Finestra di contesto ·
 307.6k / 1M (31%)" con la sua barra, poi "Limiti di utilizzo del piano" con nome
 a sinistra, "Si ripristina tra…/Si azzera…" e percentuale a destra, barra sottile
@@ -89,8 +89,9 @@ I testi (mod e app) si adattano **automaticamente** alla lingua di Windows: ital
 Oltre alla mod, in [tray/](tray/) c'è un **programma Windows**
 (`ClaudeLimitsTray.exe`, si disinstalla da *App installate*) che mette
 un'icona nell'area di notifica: al clic o con **Ctrl+Alt+L** apre lo stesso
-popup dei limiti; l'icona in basso a destra del popup apre accanto un **popup
-dei grafici** (utilizzo reale contro il ritmo ideale, con la proiezione al reset). L'icona cambia colore secondo il ritmo (il peggiore
+popup dei limiti; l'icona in basso a destra del popup lo sostituisce con un
+**popup dei grafici** (utilizzo reale contro il ritmo ideale, con la proiezione
+al reset). L'icona cambia colore secondo il ritmo (il peggiore
 tra 5 ore e settimanale), il programma manda **notifiche di Windows** (soglie,
 ritmo, reset, e se vuoi "usalo o lo perdi" e "non disturbare") e si **aggiorna
 con un clic** quando esce una nuova release. Tutto si regola dalla finestra

@@ -120,6 +120,8 @@ Test 'colore del ritmo con le soglie predefinite e personalizzate' {
   Assert-Equal (Get-PaceState (W five_hour 45 50) $s) 'orange'
   Assert-Equal (Get-PaceState (W five_hour 44 50) $s) 'green'
   Assert-Equal (Get-PaceState (W five_hour 44 $null) $s) 'base'
+  Assert-Equal (Get-PaceState (W five_hour 0 3) $s) 'green' '0% a inizio finestra'
+  Assert-Equal (Get-PaceState (W five_hour 0 0) $s) 'green' '0% a 0%'
   $s.orangeBand = 10; $s.redAbove = 3
   Assert-Equal (Get-PaceState (W five_hour 52 50) $s) 'orange' 'fino a 3 punti sopra resta arancione'
   Assert-Equal (Get-PaceState (W five_hour 54 50) $s) 'red'

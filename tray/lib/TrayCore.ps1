@@ -49,7 +49,7 @@ $script:Strings = @{
     segBoth = 'Entrambi'; segFive = '5 ore'; segSeven = 'Settimanale'
     cOrange = 'Arancione'; dOrange = 'Fino a quanti punti sotto il ritmo.'
     cRed = 'Rosso'; dRed = 'Oltre quanti punti sopra il ritmo.'
-    cGraph = 'Grafici insieme ai limiti'; dGraph = 'Apri il popup dei grafici ogni volta (o dall''icona in basso a destra).'
+    cGraph = 'Apri subito i grafici'; dGraph = 'Icona e Ctrl+Alt+L aprono i grafici; con ‹ torni ai limiti.'
     cHotkeyOn = 'Scorciatoia da tastiera'; dHotkeyOn = 'Apre e chiude il popup da qualsiasi programma.'
     cHotkey = 'Combinazione'; dHotkey = 'Clicca nel campo e premi i tasti.'
     cNotify = 'Notifiche'; dNotify = 'Soglie, ritmo e reset dei limiti.'
@@ -109,7 +109,7 @@ $script:Strings = @{
     segBoth = 'Both'; segFive = '5-hour'; segSeven = 'Weekly'
     cOrange = 'Orange'; dOrange = 'Up to how many points behind pace.'
     cRed = 'Red'; dRed = 'Above how many points ahead of pace.'
-    cGraph = 'Charts with the limits'; dGraph = 'Open the charts popup every time (or from the bottom-right icon).'
+    cGraph = 'Open the charts first'; dGraph = 'The icon and Ctrl+Alt+L open the charts; ‹ goes back to the limits.'
     cHotkeyOn = 'Keyboard shortcut'; dHotkeyOn = 'Opens and closes the popup from any app.'
     cHotkey = 'Combination'; dHotkey = 'Click the field and press the keys.'
     cNotify = 'Notifications'; dNotify = 'Thresholds, pace and limit resets.'
@@ -284,7 +284,7 @@ function Get-DefaultSettings {
     colorIcon       = $true
     orangeBand      = 5           # arancione da 0 a 5 punti sotto il ritmo
     redAbove        = 0           # rosso oltre 0 punti sopra il ritmo
-    showGraph       = $false     # popup dei grafici: si apre dall'icona in basso a destra
+    showGraph       = $false     # true = si aprono prima i grafici invece dei limiti
     useItEnabled    = $false      # "usalo o lo perdi": spento di base
     useItFiveMin    = 30
     useItSevenHours = 12
@@ -337,9 +337,11 @@ function ConvertTo-TraySettings($raw) {
 
 # --- Ritmo e colore dell'icona ---
 # diff = utilizzo − tempo trascorso (punti): rosso oltre redAbove, arancione da
-# 0 a orangeBand punti sotto (o fino a redAbove sopra), verde più sotto.
+# 0 a orangeBand punti sotto (o fino a redAbove sopra), verde più sotto. Allo 0%
+# non hai consumato nulla: sempre verde, anche a inizio finestra.
 function Get-PaceState($w, $settings) {
   if ($null -eq $w -or $null -eq $w.Elapsed -or $w.ResetPassed) { return 'base' }
+  if ($w.Percent -le 0) { return 'green' }
   $diff = $w.Percent - $w.Elapsed
   if ($diff -gt $settings.redAbove) { return 'red' }
   if ($diff -ge (-1 * $settings.orangeBand)) { return 'orange' }

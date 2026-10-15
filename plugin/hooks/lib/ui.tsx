@@ -87,10 +87,11 @@ export type PaceColor = 'error' | 'warning' | 'success'
 /**
  * Colore del ritmo: rosso se l'utilizzo supera il tempo trascorso (sei sopra
  * dove dovresti essere), arancione se sei sotto di 0–5 punti, verde se sei
- * sotto di più di 5 punti.
+ * sotto di più di 5 punti. Allo 0% non hai consumato nulla: sempre verde.
  */
 export function paceColor(view: WindowView): PaceColor | undefined {
   if (!view.time.ok || view.time.isResetPassed) return undefined
+  if (view.percentUsed <= 0) return 'success'
   const diff = view.percentUsed - view.time.elapsedPercent
   if (diff > 0) return 'error'
   if (diff >= -PACE_MARGIN) return 'warning'
