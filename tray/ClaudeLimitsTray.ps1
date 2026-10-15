@@ -34,6 +34,8 @@ $script:Strings = @{
     noData1 = 'Nessun dato dai limiti.'; noData2 = 'Apri Claude Desktop: i dati compaiono dopo la prima risposta.'
     mShow = 'Mostra i limiti'; mRefresh = 'Aggiorna'; mQuit = 'Esci'; tip = 'Claude — limiti di utilizzo'
     mNotify = 'Notifiche'
+    mIconSource = 'Colore dell''icona'; srcBoth = 'Entrambi i limiti (il peggiore)'
+    srcFive = 'Solo limite di 5 ore'; srcSeven = 'Solo limite settimanale'
     scopedWeekly = 'Settimanale · {0}'; scopedSession = 'Sessione · {0}'
     credits = 'Crediti per sessioni cloud'; creditsLeft = '{0} di {1} rimanenti'; creditsExp = 'Scade {0}'
     nTitleThr = '{0}: {1} usato'; nBodyThr = 'Hai superato la soglia del {0}%. {1}.'
@@ -50,6 +52,8 @@ $script:Strings = @{
     noData1 = 'No usage data.'; noData2 = "Open Claude Desktop: data appears after Claude's first reply."
     mShow = 'Show limits'; mRefresh = 'Refresh'; mQuit = 'Quit'; tip = 'Claude — usage limits'
     mNotify = 'Notifications'
+    mIconSource = 'Icon color'; srcBoth = 'Both limits (the worse one)'
+    srcFive = '5-hour limit only'; srcSeven = 'Weekly limit only'
     scopedWeekly = 'Weekly · {0}'; scopedSession = 'Session · {0}'
     credits = 'Cloud session credits'; creditsLeft = '{0} of {1} remaining'; creditsExp = 'Expires {0}'
     nTitleThr = '{0}: {1} used'; nBodyThr = 'You passed the {0}% threshold. {1}.'
@@ -401,18 +405,20 @@ function Toggle-Popup {
 # %APPDATA%\ClaudeLimitsTray\settings.json.
 $script:SettingsDir = Join-Path $env:APPDATA 'ClaudeLimitsTray'
 $script:SettingsFile = Join-Path $script:SettingsDir 'settings.json'
-$script:Settings = [pscustomobject]@{ notifications = $true; thresholds = @(75, 90); paceAlertPts = 15; notified = @() }
+$script:Settings = [pscustomobject]@{ notifications = $true; thresholds = @(75, 90); paceAlertPts = 15; notified = @(); iconSource = 'both' }
 
 function Load-Settings {
   try {
     if (Test-Path $script:SettingsFile) {
       $s = [System.IO.File]::ReadAllText($script:SettingsFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
-      foreach ($name in 'notifications', 'thresholds', 'paceAlertPts', 'notified') {
+      foreach ($name in 'notifications', 'thresholds', 'paceAlertPts', 'notified', 'iconSource') {
         if ($null -ne $s.$name) { $script:Settings.$name = $s.$name }
       }
     }
   } catch { }
   $script:Settings.notified = @($script:Settings.notified)
+  # both = il peggiore tra 5 ore e settimanale; five_hour / seven_day = solo quello
+  if (@('both', 'five_hour', 'seven_day') -notcontains [string]$script:Settings.iconSource) { $script:Settings.iconSource = 'both' }
 }
 
 function Save-Settings {
@@ -498,6 +504,24 @@ $miNotify.CheckOnClick = $true
 $miNotify.Checked = [bool]$script:Settings.notifications
 $miNotify.add_Click({ $script:Settings.notifications = $miNotify.Checked; Save-Settings })
 [void]$menu.Items.Add($miNotify)
+$miIconSource = New-Object System.Windows.Forms.ToolStripMenuItem $script:T.mIconSource
+$script:IconSourceItems = @{}
+foreach ($pair in @(@('both', $script:T.srcBoth), @('five_hour', $script:T.srcFive), @('seven_day', $script:T.srcSeven))) {
+  $item = New-Object System.Windows.Forms.ToolStripMenuItem $pair[1]
+  $item.Tag = $pair[0]
+  $item.Checked = ($script:Settings.iconSource -eq $pair[0])
+  $item.add_Click({
+    param($sender, $e)
+    $script:Settings.iconSource = [string]$sender.Tag
+    Save-Settings
+    foreach ($k in $script:IconSourceItems.Keys) { $script:IconSourceItems[$k].Checked = ($k -eq $script:Settings.iconSource) }
+    $script:IconKey = ''
+    Update-TrayIcon
+  })
+  $script:IconSourceItems[$pair[0]] = $item
+  [void]$miIconSource.DropDownItems.Add($item)
+}
+[void]$menu.Items.Add($miIconSource)
 [void]$menu.Items.Add('-')
 $miExit = $menu.Items.Add($script:T.mQuit)
 $miExit.add_Click({
@@ -538,7 +562,9 @@ function Update-Tooltip {
 }
 
 # --- Icona viva: lo stesso orologio di sempre, colorato secondo il ritmo ---
-# Confronto tra utilizzo reale del limite di 5 ore e tempo trascorso:
+# Confronto tra utilizzo reale e tempo trascorso; di base guarda sia il limite di
+# 5 ore sia il settimanale e mostra quello messo peggio (rosso > arancione >
+# verde). Dal menu si può scegliere di guardarne uno solo.
 #   verde     = più di 5 punti sotto il ritmo
 #   arancione = da 0 a 5 punti sotto il ritmo (anche senza stima disponibile)
 #   rosso     = sopra il ritmo
@@ -583,10 +609,23 @@ function Get-PaceState($w) {
   return 'green'
 }
 
+$script:PaceRank = @{ base = 0; green = 1; orange = 2; red = 3 }
+
+function Get-IconState {
+  if ($null -eq $script:Data) { return 'base' }
+  $kinds = if ($script:Settings.iconSource -eq 'both') { @('five_hour', 'seven_day') } else { @([string]$script:Settings.iconSource) }
+  $worst = 'base'
+  foreach ($kind in $kinds) {
+    # Solo i limiti generali: quelli di un singolo modello (es. Fable) hanno un nome.
+    $w = $script:Data.Windows | Where-Object { $_.Kind -eq $kind -and -not $_.Name } | Select-Object -First 1
+    $state = Get-PaceState $w
+    if ($script:PaceRank[$state] -gt $script:PaceRank[$worst]) { $worst = $state }
+  }
+  return $worst
+}
+
 function Update-TrayIcon {
-  $w = $null
-  if ($null -ne $script:Data) { $w = $script:Data.Windows | Where-Object { $_.Kind -eq 'five_hour' } | Select-Object -First 1 }
-  $state = Get-PaceState $w
+  $state = Get-IconState
   if ($state -eq $script:IconKey) { return }
   $notify.Icon = if ($state -eq 'base') { $script:BaseIcon } else { $script:PaceIcons[$state] }
   $script:IconKey = $state

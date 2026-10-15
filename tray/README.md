@@ -26,10 +26,15 @@ usato Claude Desktop almeno una volta (così il file dei dati esiste).
 
 - **Clic sinistro** sull'icona: apre/chiude il popup.
 - **Clic fuori** dal popup o **Esc**: lo chiude.
-- **Clic destro**: menu *Mostra i limiti*, *Aggiorna*, *Notifiche* (attiva/disattiva), *Esci*.
+- **Clic destro**: menu *Mostra i limiti*, *Aggiorna*, *Notifiche* (attiva/disattiva),
+  *Colore dell'icona* (vedi sotto), *Esci*.
 
 L'icona è l'orologio di sempre, ma il colore cambia in tempo reale confrontando
-l'utilizzo del limite di 5 ore con il tempo trascorso:
+l'utilizzo con il tempo trascorso. Di base guarda **sia il limite di 5 ore sia il
+settimanale** e mostra quello messo peggio (rosso prima di arancione, arancione
+prima di verde); da *Colore dell'icona* nel menu si può scegliere *Solo limite di
+5 ore* o *Solo limite settimanale*. I limiti di un singolo modello (es. Fable)
+non cambiano il colore. Per ogni limite:
 
 - **verde**: più di 5 punti sotto il ritmo;
 - **arancione**: da 0 a 5 punti sotto il ritmo (o stima non disponibile);
@@ -52,7 +57,8 @@ Il programma avvisa con una notifica di Windows, **una sola volta per finestra**
 
 Si spengono dal menu del clic destro (*Notifiche*). La scelta e gli avvisi già
 inviati restano in `%APPDATA%\ClaudeLimitsTray\settings.json`, dove si possono
-cambiare anche le soglie (`thresholds`) e lo scarto di ritmo (`paceAlertPts`,
+cambiare anche le soglie (`thresholds`), il limite che colora l'icona
+(`iconSource`: `both`, `five_hour`, `seven_day`) e lo scarto di ritmo (`paceAlertPts`,
 `0` = mai).
 
 ## Lingua
