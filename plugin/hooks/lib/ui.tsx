@@ -9,7 +9,6 @@ import type { Credit } from './serverUsage'
 import { roundUse } from './sessionUse'
 import type { SessionUse } from './sessionUse'
 import type { Breakdown } from './serverUsage'
-import type { ProjectShare } from './projectUse'
 import { formatDuration, formatPercent, formatResetTime, toEpochMs } from './timeWindow'
 import type { WindowView } from './windows'
 
@@ -251,19 +250,6 @@ export function breakdownText(rows: readonly Breakdown[], lang: Lang = 'it'): st
   return parts.length === 0 ? undefined : d.breakdown(parts.join(' · '))
 }
 
-/** Nome mostrato per una riga del consumo per progetto. */
-export function projectLabel(row: ProjectShare['rows'][number], lang: Lang = 'it'): string {
-  if (row.isOthers) return dict(lang).projectsOthers
-  return row.project.length > 32 ? `${row.project.slice(0, 31)}…` : row.project
-}
-
-/** Frase per il comando /usage-time; undefined senza dati. */
-export function projectShareText(share: ProjectShare | null | undefined, lang: Lang = 'it'): string | undefined {
-  if (share === null || share === undefined || share.rows.length === 0) return undefined
-
-  return dict(lang).projectsLine(share.rows.map(r => `${projectLabel(r, lang)} ${r.percent}%`).join(' · '))
-}
-
 export type TextBars = {
   /** [utilizzo fino al ritmo, tratto rosso/verde, resto vuoto] */
   usage: [string, string, string]
@@ -317,8 +303,6 @@ export type BandInput = {
   sessionUse?: SessionUse
   /** Ripartizione del settimanale per prodotto (dal server). */
   breakdown?: readonly Breakdown[]
-  /** Consumo per progetto nella finestra di 5 ore (tutte le sessioni). */
-  projects?: ProjectShare | null
 }
 
 /** Larghezza massima della scheda, in colonne: quella del popup dei limiti. */
@@ -409,7 +393,6 @@ export function renderBand(input: BandInput): RenderElement {
   const contextCells = context === undefined ? 0 : Math.round((Math.min(100, context.percent ?? 0) / 100) * barCells)
   const sessionLine = sessionUseText(input.sessionUse, lang)
   const split = breakdownText(input.breakdown ?? [], lang)
-  const projectRows = input.projects?.rows ?? []
 
   const card = (
     <Box
@@ -483,23 +466,6 @@ export function renderBand(input: BandInput): RenderElement {
       {sessionLine !== undefined && (
         <Box key="session-use" marginTop={1}>
           <Text dimColor>{sessionLine}</Text>
-        </Box>
-      )}
-      {projectRows.length > 0 && (
-        <Box key="projects" flexDirection="column" marginTop={1}>
-          <Text dimColor>{d.projectsTitle}</Text>
-          {projectRows.map(row => {
-            const cells = Math.max(1, Math.round((row.percent / 100) * Math.min(20, barCells)))
-            return (
-              <Box key={`project-${row.isOthers ? '*' : row.project}`} justifyContent="space-between">
-                <Text>{projectLabel(row, lang)}</Text>
-                <Text>
-                  <Text color="suggestion">{'▮'.repeat(cells)}</Text>
-                  <Text>{` ${row.percent}%`}</Text>
-                </Text>
-              </Box>
-            )
-          })}
         </Box>
       )}
       {(input.credits ?? []).map(credit => {

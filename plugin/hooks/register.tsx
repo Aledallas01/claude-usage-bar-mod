@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, SessionContextUsage, SessionRateLimit } from 'claude-code'
 
-import type { StoredBreakdown, StoredContext, StoredCredit, StoredLimits, StoredProjectShare, StoredWindow } from '../types'
+import type { StoredBreakdown, StoredContext, StoredCredit, StoredLimits, StoredWindow } from '../types'
 import { readConfig } from './lib/config'
 import type { Config } from './lib/config'
 import { dict, normalizeLang } from './lib/i18n'
@@ -16,15 +16,12 @@ import {
   breakdownText,
   contextText,
   creditSummary,
-  projectShareText,
   renderBand,
   renderEmptyCard,
   renderModeButton,
   sessionUseText,
   statusText,
 } from './lib/ui'
-import { aggregateProjects, appendCost, lastActivity, parseProjectLog, PROJECT_KEEP_MS, PROJECT_KEY_PREFIX, projectName } from './lib/projectUse'
-import type { ProjectLog } from './lib/projectUse'
 import { mergeWindows, parseServerExtras, parseServerUsage, retryAfterMs, USAGE_HEADERS, USAGE_URL } from './lib/serverUsage'
 import type { ServerExtras } from './lib/serverUsage'
 import { accrue, isSessionActive } from './lib/sessionUse'
@@ -40,13 +37,6 @@ const lang = atom({ plugin: 'usage-time-bar', key: 'lang' } as const, 'it')
 const sessionUse = atom({ plugin: 'usage-time-bar', key: 'sessionUse' } as const, {})
 const openTurns = atom({ plugin: 'usage-time-bar', key: 'openTurns' } as const, 0)
 const lastTurnEnd = atom({ plugin: 'usage-time-bar', key: 'lastTurnEnd' } as const, 0)
-// Consumo per progetto: registro dei costi di questa sessione nello store, quote di tutte.
-const sessionKey = atom({ plugin: 'usage-time-bar', key: 'sessionKey' } as const, '')
-const lastCostUsd = atom({ plugin: 'usage-time-bar', key: 'lastCostUsd' } as const, -1)
-const projectShare = atom({ plugin: 'usage-time-bar', key: 'projectShare' } as const, null)
-
-/** Nome del progetto di questa sessione (cartella), fissato a session.start. */
-let project = ''
 
 /**
  * Lingua dell'interfaccia. In ordine: scelta forzata in configurazione; lingua
@@ -88,7 +78,8 @@ const STORE_HIDDEN = 'isHidden'
 const STORE_SERVER_AT = 'serverFetchedAt'
 const STORE_SERVER_STATUS = 'serverStatus'
 const STORE_SERVER_BACKOFF = 'serverBackoff'
-const STORE_PROJECTS = 'projectShare'
+// Voci del consumo per progetto della 0.10.0 non pubblicata: tolte all'avvio.
+const LEGACY_PROJECT_KEY = /^proj:|^projectShare$/
 
 /** Pausa dopo un rifiuto del server (429/5xx): raddoppia fino a 30 minuti. */
 const BACKOFF_MIN_MS = 2 * 60_000
@@ -304,57 +295,6 @@ async function fetchServer($: EngineInterface, config: Config) {
   await refreshStatus($, config)
 }
 
-/**
- * Registra la spesa di questa sessione (aumento del costo totale dall'ultima
- * lettura) nella sua voce dello store, insieme al nome del progetto.
- */
-async function recordCost($: EngineInterface, usd: number | undefined, now: number) {
-  if (usd === undefined || !Number.isFinite(usd) || project === '') return
-  const last = await read($, lastCostUsd)
-  await update($, lastCostUsd, () => usd)
-  // Prima lettura, o costo ripartito da zero (/clear): è il nuovo punto di partenza.
-  if (last < 0 || usd < last) return
-  const spent = usd - last
-  if (spent <= 0) return
-  let key = await read($, sessionKey)
-  if (key === '') {
-    key = `${PROJECT_KEY_PREFIX}${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    await update($, sessionKey, () => key)
-  }
-  const saved = parseProjectLog(await $.store.get(key)) ?? { project, events: [] }
-  await $.store.set(key, appendCost({ project, events: saved.events }, now, spent))
-}
-
-/**
- * Somma le voci di tutte le sessioni nella finestra di 5 ore attuale e ricava la
- * quota di ciascun progetto. Toglie le voci delle sessioni ferme da più di 6 ore.
- */
-async function refreshProjects($: EngineInterface, now: number) {
-  const stored = await read($, limits)
-  const five = stored?.windows.find(w => w.kind === 'five_hour')
-  const reset = five?.resetsAt === undefined ? NaN : Date.parse(five.resetsAt)
-  // Inizio della finestra di 5 ore (dal reset), o le ultime 5 ore se non è noto.
-  const from = Number.isFinite(reset) && reset > now ? reset - 5 * 3_600_000 : now - 5 * 3_600_000
-  const own = await read($, sessionKey)
-  const logs: ProjectLog[] = []
-  for (const key of await $.store.keys()) {
-    if (!key.startsWith(PROJECT_KEY_PREFIX)) continue
-    const log = parseProjectLog(await $.store.get(key))
-    if (log === undefined || (key !== own && now - lastActivity(log) > PROJECT_KEEP_MS)) {
-      await $.store.delete(key)
-      continue
-    }
-    logs.push(log)
-  }
-  const share: StoredProjectShare = aggregateProjects(logs, from)
-  const prev = await read($, projectShare)
-  if (JSON.stringify(prev?.rows) !== JSON.stringify(share.rows) || prev?.from !== share.from) {
-    await update($, projectShare, () => share)
-    // Anche per l'app nella barra di Windows, che legge lo store.
-    await $.store.set(STORE_PROJECTS, share)
-  }
-}
-
 async function tick($: EngineInterface, config: Config) {
   // Una sola unione per giro: la lettura della sessione (se c'è) più quella
   // salvata dalle altre sessioni e dal server.
@@ -364,7 +304,6 @@ async function tick($: EngineInterface, config: Config) {
     const usage = await $.session.usage()
     windows = pickWindows(usage.rateLimits)
     context = ownContextOf(usage.context)
-    await recordCost($, usage.cost?.usd, await $.clock.now())
   } catch {
     // Lettura non disponibile in questo momento: unisco solo lo store.
   }
@@ -374,11 +313,6 @@ async function tick($: EngineInterface, config: Config) {
     // Store illeggibile in questo istante: riprovo al prossimo giro.
   }
   const now = await $.clock.now()
-  try {
-    await refreshProjects($, now)
-  } catch {
-    // Store illeggibile in questo istante: riprovo al prossimo giro.
-  }
   await update($, clockNow, () => now)
   await refreshStatus($, config)
 }
@@ -418,7 +352,6 @@ export const register: Register = (on, options) => {
   const config = readConfig(options)
 
   on('session.start', async ($, e, next) => {
-    project = projectName(e.cwd)
     const detected = await detectLang($, config)
     await update($, lang, () => detected)
     const d = dict(detected)
@@ -427,6 +360,11 @@ export const register: Register = (on, options) => {
       description: d.cmdDescription,
       argumentHint: d.cmdArgHint,
     })
+    try {
+      for (const key of await $.store.keys()) if (LEGACY_PROJECT_KEY.test(key)) await $.store.delete(key)
+    } catch {
+      // Pulizia facoltativa: riprova al prossimo avvio.
+    }
     // La fascia segue la scelta salvata con /usage-time mostra|nascondi, se c'è.
     const saved = await $.store.get(STORE_HIDDEN)
     const hidden = typeof saved === 'boolean' ? saved : !config.showBand
@@ -465,7 +403,6 @@ export const register: Register = (on, options) => {
     if (e.changed.includes('rateLimits') || e.changed.includes('context')) {
       await remember($, config, e.rateLimits, e.context)
     }
-    if (e.changed.includes('cost')) await recordCost($, e.cost?.usd, await $.clock.now())
 
     return next(e)
   })
@@ -492,7 +429,6 @@ export const register: Register = (on, options) => {
       bodyColumns: e.props.bodyColumns,
       sessionUse: await read($, sessionUse),
       breakdown: stored.breakdown,
-      projects: await read($, projectShare),
     })
   })
 
@@ -518,7 +454,6 @@ export const register: Register = (on, options) => {
       isPane: true,
       sessionUse: await read($, sessionUse),
       breakdown: stored.breakdown,
-      projects: await read($, projectShare),
       onClose,
     })
   })
@@ -584,8 +519,6 @@ export const register: Register = (on, options) => {
     if (session !== undefined) lines.push(`${session}.`)
     const split = breakdownText(stored.breakdown ?? [], l)
     if (split !== undefined) lines.push(`${split}.`)
-    const projects = projectShareText(await read($, projectShare), l)
-    if (projects !== undefined) lines.push(`${projects}.`)
     if (stored.context !== undefined) lines.unshift(d.contextOf(contextText(stored.context)))
 
     return { text: lines.join('\n') }

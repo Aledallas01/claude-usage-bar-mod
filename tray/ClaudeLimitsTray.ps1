@@ -509,7 +509,6 @@ function Measure-PopupHeight($data) {
   $h += 22  # titolo "Limiti di utilizzo del piano"
   $h += $data.Windows.Count * 54
   if ($null -ne (Get-BreakdownText $data)) { $h += 18 }
-  if (@($data.Projects).Count -gt 0) { $h += 24 + @($data.Projects).Count * 20 }
   $h += @($data.Credits).Count * 58
   if (@(Get-ChartWindows).Count -gt 0) { $h += $FooterHeight }
   $h += 8   # margine inferiore
@@ -634,26 +633,6 @@ function On-PaintCore {
       if ($null -ne $split) {
         $g.DrawString($split, $fSmall, $bDim, $pad, ($y - 4))
         $y += 18
-      }
-    }
-
-    # Consumo per progetto (5 ore): nome a sinistra, barretta e percentuale a destra.
-    if (@($data.Projects).Count -gt 0) {
-      $y += 4
-      $g.DrawString($t.projects, $fTitle, $bDim, $pad, $y)
-      $y += 20
-      $miniW = 90
-      foreach ($p in @($data.Projects)) {
-        $g.DrawString((Get-ProjectLabel $p), $fVal, $bText, $pad, $y)
-        $pctText = "$([int]$p.Percent)%"
-        $g.DrawString($pctText, $fVal, $bText, [single]($cw - $pad), [single]$y, $sfRight)
-        $bx = $cw - $pad - 44 - $miniW
-        $track = New-Object System.Drawing.SolidBrush $ColTrack
-        $blue = New-Object System.Drawing.SolidBrush $ColBlue
-        $g.FillRectangle($track, $bx, ($y + 7), $miniW, 6)
-        $g.FillRectangle($blue, $bx, ($y + 7), [int]([math]::Round((Clamp01 ($p.Percent / 100.0)) * $miniW)), 6)
-        $track.Dispose(); $blue.Dispose()
-        $y += 20
       }
     }
 

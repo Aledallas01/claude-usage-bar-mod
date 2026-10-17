@@ -61,10 +61,6 @@ export type Dict = {
   breakdown: (parts: string) => string
   /** Nomi dei prodotti nella ripartizione, per chiave del server. */
   breakdownNames: Record<string, string>
-  projectsTitle: string
-  projectsOthers: string
-  /** Frase per il comando: "Consumo per progetto (5 h): A 70% · B 30%" */
-  projectsLine: (parts: string) => string
   sessionKind: Record<WindowKind, string>
   // comando /usage-time
   cmdDescription: string
@@ -120,9 +116,6 @@ const DICTS: Record<Lang, Dict> = {
     sessionUse: parts => `Questa sessione: ${parts} (stima)`,
     breakdown: parts => `Settimanale: ${parts}`,
     breakdownNames: { claude_code: 'Claude Code', chat: 'Chat', cowork: 'Cowork', other: 'Altro' },
-    projectsTitle: 'Consumo per progetto · 5 h (stima)',
-    projectsOthers: 'altri',
-    projectsLine: parts => `Consumo per progetto, finestra di 5 ore (stima dalle sessioni di Claude Code): ${parts}`,
     sessionKind: { five_hour: '5 ore', seven_day: 'settimanale' },
     cmdDescription: 'Utilizzo reale e tempo trascorso dei limiti di 5 ore e 7 giorni',
     cmdArgHint: '[mostra|nascondi|dettagli]',
@@ -175,9 +168,6 @@ const DICTS: Record<Lang, Dict> = {
     sessionUse: parts => `This session: ${parts} (estimate)`,
     breakdown: parts => `Weekly: ${parts}`,
     breakdownNames: { claude_code: 'Claude Code', chat: 'Chat', cowork: 'Cowork', other: 'Other' },
-    projectsTitle: 'Usage by project · 5 h (estimate)',
-    projectsOthers: 'others',
-    projectsLine: parts => `Usage by project, 5-hour window (estimated from Claude Code sessions): ${parts}`,
     sessionKind: { five_hour: '5-hour', seven_day: 'weekly' },
     cmdDescription: 'Real usage and time elapsed for the 5-hour and 7-day limits',
     cmdArgHint: '[show|hide|details]',

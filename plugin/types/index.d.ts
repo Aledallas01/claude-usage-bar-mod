@@ -22,11 +22,6 @@ export type StoredCredit = {
 /** Ripartizione del settimanale per prodotto ("Claude Code 38% · Chat 62%"). */
 export type StoredBreakdown = { key: string; name: string; percent: number }
 
-/** Quota di consumo di un progetto nella finestra di 5 ore (stima dal costo). */
-export type StoredProjectRow = { project: string; percent: number; isOthers?: boolean }
-
-export type StoredProjectShare = { from: number; rows: StoredProjectRow[] }
-
 export type StoredLimits = {
   observedAt: number
   windows: StoredWindow[]
@@ -54,12 +49,6 @@ declare module 'claude-code' {
       openTurns: number
       /** Fine dell'ultimo turno (ms), 0 = nessuno. */
       lastTurnEnd: number
-      /** Chiave dello store con il registro dei costi di questa sessione ('' = non ancora). */
-      sessionKey: string
-      /** Ultimo costo totale della sessione visto (USD), -1 = nessuno. */
-      lastCostUsd: number
-      /** Quote di consumo per progetto nella finestra di 5 ore. */
-      projectShare: StoredProjectShare | null
     }
   }
 }
