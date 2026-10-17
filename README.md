@@ -41,6 +41,19 @@ cloud** ("250 USD di 250 USD rimanenti", con la scadenza). Questi due arrivano
 solo dalla lettura dal server (`serverRefreshSeconds`); se il server non li
 comunica, le righe non compaiono.
 
+Due righe in più aiutano a capire **dove** va il consumo:
+
+* **Ripartizione del settimanale** per prodotto, sotto "Settimanale · tutti i
+  modelli": `Settimanale: Claude Code 38% · Chat 62%` (dato del server, come la
+  ripartizione dettagliata di Claude).
+* **Consumo per progetto · 5 h**: quanto ha pesato ogni progetto nella finestra
+  di 5 ore, sommando tutte le sessioni di Claude Code aperte (anche in progetti
+  diversi), con i primi 4 per nome e il resto in "altri". Ogni sessione registra
+  quanto spende (il costo che il motore misura) con il nome della sua cartella,
+  in una voce dello store tutta sua; le voci delle sessioni ferme da più di 6 ore
+  vengono tolte. È una **stima**: il limite segue il costo da vicino ma non
+  coincide, e le chat su claude.ai non compaiono (sono nella ripartizione sopra).
+
 Per ciascuna finestra (Limite di 5 ore, Settimanale):
 
 * **barra piena arancione**: utilizzo reale comunicato da Claude, invariato;

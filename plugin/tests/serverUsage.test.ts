@@ -90,7 +90,7 @@ describe('limiti per modello e crediti (come nel popup di Claude)', () => {
   })
 
   test('risposta senza limiti per modello né crediti: elenchi vuoti', () => {
-    expect(parseServerExtras('{"five_hour":{"utilization":3}}')).toEqual({ scoped: [], credits: [] })
-    expect(parseServerExtras('non json')).toEqual({ scoped: [], credits: [] })
+    expect(parseServerExtras('{"five_hour":{"utilization":3}}')).toEqual({ scoped: [], credits: [], breakdown: [] })
+    expect(parseServerExtras('non json')).toEqual({ scoped: [], credits: [], breakdown: [] })
   })
 })

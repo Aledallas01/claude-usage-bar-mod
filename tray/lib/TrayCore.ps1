@@ -23,6 +23,8 @@ $script:Strings = @{
     srcFive = 'Solo limite di 5 ore'; srcSeven = 'Solo limite settimanale'
     scopedWeekly = 'Settimanale · {0}'; scopedSession = 'Sessione · {0}'
     credits = 'Crediti per sessioni cloud'; creditsLeft = '{0} di {1} rimanenti'; creditsExp = 'Scade {0}'
+    breakdown = 'Settimanale: {0}'; bdClaudeCode = 'Claude Code'; bdChat = 'Chat'; bdCowork = 'Cowork'; bdOther = 'Altro'
+    projects = 'Consumo per progetto · 5 h (stima)'; projectsOthers = 'altri'
     nTitleThr = '{0}: {1} usato'; nBodyThr = 'Hai superato la soglia del {0}%. {1}.'
     nTitleReset = '{0} ripristinato'; nBodyReset = 'Il limite si è azzerato: puoi tornare a usare Claude a pieno ritmo.'
     nTitlePace = '{0}: sopra il ritmo'; nBodyPace = 'Stai consumando {0} punti più in fretta del tempo che passa.'
@@ -83,6 +85,8 @@ $script:Strings = @{
     srcFive = '5-hour limit only'; srcSeven = 'Weekly limit only'
     scopedWeekly = 'Weekly · {0}'; scopedSession = 'Session · {0}'
     credits = 'Cloud session credits'; creditsLeft = '{0} of {1} remaining'; creditsExp = 'Expires {0}'
+    breakdown = 'Weekly: {0}'; bdClaudeCode = 'Claude Code'; bdChat = 'Chat'; bdCowork = 'Cowork'; bdOther = 'Other'
+    projects = 'Usage by project · 5 h (estimate)'; projectsOthers = 'others'
     nTitleThr = '{0}: {1} used'; nBodyThr = 'You passed the {0}% threshold. {1}.'
     nTitleReset = '{0} reset'; nBodyReset = 'The limit has reset: you can use Claude at full pace again.'
     nTitlePace = '{0}: ahead of pace'; nBodyPace = 'You are using it {0} points faster than time is passing.'
@@ -244,13 +248,49 @@ function ConvertFrom-StoreJson($json, [long]$updatedMs, [long]$now) {
     }
   }
 
+  # Ripartizione del settimanale per prodotto (dal server, tramite la mod).
+  $breakdown = @()
+  foreach ($b in @($last.breakdown)) {
+    if ($null -eq $b -or $null -eq $b.percent -or [double]$b.percent -le 0) { continue }
+    $breakdown += [pscustomobject]@{ Key = [string]$b.key; Name = [string]$b.name; Percent = [double]$b.percent }
+  }
+
+  # Consumo per progetto nella finestra di 5 ore, calcolato dalla mod.
+  $projects = @()
+  if ($json.projectShare -and $json.projectShare.rows) {
+    foreach ($r in @($json.projectShare.rows)) {
+      if ($null -eq $r -or $null -eq $r.percent) { continue }
+      $projects += [pscustomobject]@{ Project = [string]$r.project; Percent = [double]$r.percent; IsOthers = [bool]$r.isOthers }
+    }
+  }
+
   return [pscustomobject]@{
     Windows   = $windows
     Credits   = $credits
+    Breakdown = $breakdown
+    Projects  = $projects
     Context   = $ctx
     UpdatedMs = $updatedMs
     IsStale   = ($now - $updatedMs) -gt $script:StaleMs
   }
+}
+
+# "Settimanale: Claude Code 38% · Chat 62%"; $null senza dati.
+function Get-BreakdownText($data) {
+  $t = $script:T
+  $parts = foreach ($b in @($data.Breakdown)) {
+    $name = switch ($b.Key) { 'claude_code' { $t.bdClaudeCode } 'chat' { $t.bdChat } 'cowork' { $t.bdCowork } 'other' { $t.bdOther } default { $b.Name } }
+    "$name $([int][math]::Round($b.Percent))%"
+  }
+  if (@($parts).Count -eq 0) { return $null }
+  return [string]::Format($t.breakdown, (@($parts) -join ' · '))
+}
+
+# Nome di una riga del consumo per progetto (accorciato se lungo).
+function Get-ProjectLabel($row) {
+  if ($row.IsOthers) { return $script:T.projectsOthers }
+  if ($row.Project.Length -gt 30) { return $row.Project.Substring(0, 29) + '…' }
+  return $row.Project
 }
 
 function Get-WindowTitle($w) {

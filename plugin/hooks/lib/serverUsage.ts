@@ -17,7 +17,10 @@ export type Credit = {
   expiresAt?: string
 }
 
-export type ServerExtras = { scoped: UsageWindow[]; credits: Credit[] }
+/** Ripartizione del settimanale per prodotto ("Claude Code 38% · Chat 62%"). */
+export type Breakdown = { key: string; name: string; percent: number }
+
+export type ServerExtras = { scoped: UsageWindow[]; credits: Credit[]; breakdown: Breakdown[] }
 
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage'
 export const USAGE_HEADERS: Record<string, string> = { 'anthropic-beta': 'oauth-2025-04-20' }
@@ -115,7 +118,7 @@ function finite(v: unknown): v is number {
  *   nome in codice che cambia, quindi si riconoscono dalla forma.
  */
 export function parseServerExtras(text: string): ServerExtras {
-  const out: ServerExtras = { scoped: [], credits: [] }
+  const out: ServerExtras = { scoped: [], credits: [], breakdown: [] }
   let body: unknown
   try {
     body = JSON.parse(text)
@@ -137,6 +140,17 @@ export function parseServerExtras(text: string): ServerExtras {
       const w: UsageWindow = { kind, label: name, name, percentUsed: Math.round(percent * 10) / 10 }
       if (typeof resets_at === 'string' && toEpochMs(resets_at) !== undefined) w.resetsAt = resets_at
       out.scoped.push(w)
+    }
+  }
+
+  // "seven_day_breakdown": { rows: [{ key, display_name, percent }] }
+  const bd = root.seven_day_breakdown as { rows?: unknown } | null | undefined
+  if (bd !== null && typeof bd === 'object' && Array.isArray(bd.rows)) {
+    for (const row of bd.rows) {
+      if (row === null || typeof row !== 'object') continue
+      const { key, display_name, percent } = row as Record<string, unknown>
+      if (typeof key !== 'string' || !finite(percent)) continue
+      out.breakdown.push({ key, name: typeof display_name === 'string' ? display_name : key, percent: Math.round(percent) })
     }
   }
 

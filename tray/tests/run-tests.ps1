@@ -86,6 +86,20 @@ Test 'lettura dello store: finestre, tempo trascorso, crediti, contesto' {
   Assert-Equal (ConvertFrom-StoreJson (New-Store) ($Now - 30 * 60000) $Now).IsStale $true 'dati vecchi'
 }
 
+Test 'ripartizione del settimanale e consumo per progetto dallo store' {
+  $json = ('{"lastLimits":{"observedAt":1,"windows":[{"kind":"seven_day","label":"y","percentUsed":81,"resetsAt":"2026-10-14T17:30:00Z"}],' +
+    '"breakdown":[{"key":"claude_code","name":"Claude Code","percent":38},{"key":"chat","name":"Chats","percent":62},{"key":"cowork","name":"Cowork","percent":0}],"extrasAt":1},' +
+    '"projectShare":{"from":1,"rows":[{"project":"ClaudeUsageBarMod","percent":70},{"project":"Frisigram2","percent":20},{"project":"","percent":10,"isOthers":true}]}}') | ConvertFrom-Json
+  $d = ConvertFrom-StoreJson $json $Now $Now
+  Assert-Equal (Get-BreakdownText $d) 'Settimanale: Claude Code 38% · Chat 62%' 'ripartizione (voci a 0% omesse)'
+  Assert-Equal $d.Projects.Count 3 'progetti'
+  Assert-Equal (Get-ProjectLabel $d.Projects[0]) 'ClaudeUsageBarMod'
+  Assert-Equal (Get-ProjectLabel $d.Projects[2]) 'altri'
+  $empty = ConvertFrom-StoreJson (New-Store) $Now $Now
+  Assert-Equal (Get-BreakdownText $empty) $null 'senza ripartizione'
+  Assert-Equal @($empty.Projects).Count 0 'senza progetti'
+}
+
 # --- Impostazioni ---
 Test 'impostazioni: predefinite, valori non validi, file di una versione precedente' {
   $s = ConvertTo-TraySettings $null

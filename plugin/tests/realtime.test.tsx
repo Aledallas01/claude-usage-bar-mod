@@ -21,7 +21,7 @@ const BAND = {
  * Motore con uno store condiviso visibile al test: `shared` è il file che
  * anche le altre sessioni (e l'app tray) leggono e scrivono.
  */
-function engineBeneath(on: On, own: { rateLimits: SessionRateLimit[] }, isSubscribed = false) {
+function engineBeneath(on: On, own: { rateLimits: SessionRateLimit[]; costUsd?: number }, isSubscribed = false) {
   const shared: Record<string, unknown> = {}
   const clock = mock.clock(on, { now: NOW })
   on('store.get', ($, e) => ({ value: shared[e.key] }))
@@ -35,10 +35,16 @@ function engineBeneath(on: On, own: { rateLimits: SessionRateLimit[] }, isSubscr
 
     return { value: undefined }
   })
+  on('store.keys', () => ({ value: Object.keys(shared) }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('command.register', ($, e) => ({ value: { command: e.name } }))
   on('session.usage', () => ({
-    value: { startedAt: NOW, context: { window: 1_000_000, tokens: 307_600, percent: 31 }, rateLimits: own.rateLimits },
+    value: {
+      startedAt: NOW,
+      context: { window: 1_000_000, tokens: 307_600, percent: 31 },
+      rateLimits: own.rateLimits,
+      ...(own.costUsd === undefined ? {} : { cost: { usd: own.costUsd } }),
+    },
   }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
   // Con abbonamento il motore dà un handle opaco per la richiesta al server.
@@ -309,5 +315,90 @@ describe('lettura dal server (come il popup di Claude)', () => {
     expect(await ui.find({ type: 'Text', text: 'Settimanale · Fable' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '250 USD di 250 USD rimanenti' })).toBeDefined()
     await ui.unmount()
+  })
+})
+
+describe('ripartizione del settimanale e consumo per progetto', () => {
+  const PANE = {
+    component: 'Pane' as const,
+    requestId: 'usage-time',
+    props: { title: 'x', isFocused: true, bodyColumns: 56, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  }
+
+  test('Settimanale: Claude Code 38% · Chat 62%, dal server', BAND_ON, async ($, on) => {
+    const { clock } = engineBeneath(on, { rateLimits: LIMITS }, true)
+    on('http.fetch', () => ({
+      value: {
+        status: 200,
+        ok: true,
+        headers: {},
+        text: JSON.stringify({
+          five_hour: { utilization: 42, resets_at: '2026-10-10T20:00:00Z' },
+          seven_day: { utilization: 18.5, resets_at: '2026-10-14T17:30:00Z' },
+          seven_day_breakdown: {
+            rows: [
+              { key: 'claude_code', display_name: 'Claude Code', percent: 38 },
+              { key: 'chat', display_name: 'Chats', percent: 62 },
+              { key: 'cowork', display_name: 'Cowork', percent: 0 },
+            ],
+          },
+        }),
+      },
+    }))
+    await start($)
+    await clock.advance(1)
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface: 'desktop', ...BAND })
+    expect(await ui.find({ type: 'Text', text: 'Settimanale: Claude Code 38% · Chat 62%' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('quote per progetto sommando le sessioni: la propria e quella di un altro progetto', async ($, on) => {
+    const own = { rateLimits: LIMITS, costUsd: 1.0 }
+    const { clock, shared } = engineBeneath(on, own)
+    // Un'altra sessione (progetto Frisigram2) ha speso 1 USD in questa finestra.
+    shared['proj:altra'] = { project: 'Frisigram2', events: [[NOW - 60 * 60_000, 1.0]] }
+    await $.session.start({ cwd: 'C:\\Users\\me\\Desktop\\ClaudeUsageBarMod', surface: 'desktop', isInteractive: true })
+    // Questa sessione spende altri 3 USD.
+    own.costUsd = 4.0
+    await clock.advance(TICK)
+    await clock.advance(TICK)
+    const share = shared.projectShare as { rows: { project: string; percent: number }[] }
+    expect(share.rows).toEqual([
+      { project: 'ClaudeUsageBarMod', percent: 75 },
+      { project: 'Frisigram2', percent: 25 },
+    ])
+    const pane = await $.ui.mount({ plugin: PLUGIN, surface: 'terminal', ...PANE })
+    expect(await pane.find({ type: 'Text', text: 'Consumo per progetto · 5 h (stima)' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: 'ClaudeUsageBarMod' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: ' 75%' })).toBeDefined()
+    expect(await pane.find({ type: 'Text', text: ' 25%' })).toBeDefined()
+    await pane.unmount()
+  })
+
+  test('la spesa fatta prima della finestra di 5 ore non conta, e le sessioni chiuse da ore vengono tolte', async ($, on) => {
+    const { clock, shared } = engineBeneath(on, { rateLimits: LIMITS, costUsd: 0 })
+    // Finestra 15:00Z–20:00Z: una sessione ha speso alle 14:00Z (fuori), una alle 16:00Z.
+    shared['proj:vecchia'] = { project: 'Vecchio', events: [[NOW - 3.5 * 3_600_000, 5]] }
+    shared['proj:ferma'] = { project: 'Fermo', events: [[NOW - 7 * 3_600_000, 9]] }
+    shared['proj:attiva'] = { project: 'Attivo', events: [[NOW - 1.5 * 3_600_000, 2]] }
+    await $.session.start({ cwd: '/home/me/app', surface: 'desktop', isInteractive: true })
+    await clock.advance(TICK)
+    const share = shared.projectShare as { rows: { project: string; percent: number }[] }
+    expect(share.rows).toEqual([{ project: 'Attivo', percent: 100 }])
+    expect(shared['proj:ferma']).toBeUndefined()
+    expect(shared['proj:vecchia']).toBeDefined()
+  })
+
+  test('il costo già speso prima che la mod lo veda non viene attribuito', async ($, on) => {
+    const own = { rateLimits: LIMITS, costUsd: 10 }
+    const { clock, shared } = engineBeneath(on, own)
+    await $.session.start({ cwd: '/home/me/app', surface: 'desktop', isInteractive: true })
+    await clock.advance(TICK)
+    expect(Object.keys(shared).some(k => k.startsWith('proj:'))).toBe(false)
+    own.costUsd = 10.5
+    await clock.advance(TICK)
+    const log = Object.entries(shared).find(([k]) => k.startsWith('proj:'))?.[1] as { project: string; events: [number, number][] }
+    expect(log.project).toBe('app')
+    expect(Math.round(log.events.reduce((s, e) => s + e[1], 0) * 100) / 100).toBe(0.5)
   })
 })
